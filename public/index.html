@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bot Mapeeiro - Lead Generation</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+
+    <!-- Header -->
+    <header class="header">
+        <div class="header-inner">
+            <div class="logo">
+                <div class="logo-icon">🗺️</div>
+                <div>
+                    <h1>Bot Mapeeiro</h1>
+                    <p>Lead Generation &amp; Site Diagnostics</p>
+                </div>
+            </div>
+            <div class="header-actions">
+                <button class="btn btn-secondary btn-sm" onclick="testEmail()" id="btn-test-email"
+                    title="Testar email">📧 Testar Email</button>
+                <button class="btn btn-secondary btn-sm" onclick="loadStats()" title="Atualizar">🔄 Atualizar</button>
+            </div>
+        </div>
+    </header>
+
+    <div class="container">
+
+        <!-- Stats Row -->
+        <div class="stats-row">
+            <div class="stat-card">
+                <div class="stat-number" id="stat-total">0</div>
+                <div class="stat-label">Total de Leads</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number" id="stat-with-site">0</div>
+                <div class="stat-label">Com Site</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number" id="stat-with-email">0</div>
+                <div class="stat-label">Com Email</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number" id="stat-analyzed">0</div>
+                <div class="stat-label">Analisados</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number" id="stat-emailed">0</div>
+                <div class="stat-label">Emails Enviados</div>
+            </div>
+        </div>
+
+        <!-- Search Panel -->
+        <div class="search-panel">
+            <h2>🔍 Nova Busca</h2>
+            <div class="search-form">
+                <div class="form-group">
+                    <label for="search-query">Tipo de Negócio</label>
+                    <input type="text" id="search-query" placeholder="Ex: Restaurantes, Clínicas, Salões...">
+                </div>
+                <div class="form-group">
+                    <label for="search-location">Cidade / Bairro</label>
+                    <input type="text" id="search-location" placeholder="Ex: Salvador BA, Pituba...">
+                </div>
+                <button class="btn btn-primary" id="btn-search" onclick="startSearch()">
+                    🚀 Buscar
+                </button>
+            </div>
+            <div class="options-row">
+                <label class="checkbox-group">
+                    <input type="checkbox" id="opt-contacts" checked>
+                    <label for="opt-contacts">Buscar contatos nos sites</label>
+                </label>
+                <label class="checkbox-group">
+                    <input type="checkbox" id="opt-analyze" checked>
+                    <label for="opt-analyze">Analisar sites automaticamente</label>
+                </label>
+                <label class="checkbox-group">
+                    <input type="checkbox" id="opt-email">
+                    <label for="opt-email">Enviar emails automaticamente</label>
+                </label>
+            </div>
+        </div>
+
+        <!-- Progress Panel -->
+        <div class="progress-panel" id="progress-panel">
+            <div class="progress-header">
+                <span class="progress-message" id="progress-message">Iniciando...</span>
+                <span class="progress-percent" id="progress-percent">0%</span>
+            </div>
+            <div class="progress-bar-bg">
+                <div class="progress-bar-fill" id="progress-fill" style="width: 0%"></div>
+            </div>
+            <div style="margin-top: 12px; text-align: right;">
+                <button class="btn btn-danger btn-sm" onclick="stopSearch()">⏹ Parar</button>
+            </div>
+        </div>
+
+        <!-- Leads Table -->
+        <div class="leads-panel">
+            <div class="leads-header">
+                <h2>📋 Leads Coletados</h2>
+                <div class="leads-filters">
+                    <button class="filter-btn active" onclick="filterLeads('all', this)">Todos</button>
+                    <button class="filter-btn" onclick="filterLeads('with-site', this)">Com Site</button>
+                    <button class="filter-btn" onclick="filterLeads('with-email', this)">Com Email</button>
+                    <button class="filter-btn" onclick="filterLeads('analyzed', this)">Analisados</button>
+                    <button class="filter-btn" onclick="filterLeads('emailed', this)">Enviados</button>
+                </div>
+            </div>
+            <div class="leads-table-wrapper">
+                <table class="leads-table">
+                    <thead>
+                        <tr>
+                            <th>Nome</th>
+                            <th>Telefone</th>
+                            <th>Email</th>
+                            <th>Site</th>
+                            <th>Avaliação</th>
+                            <th>Status</th>
+                            <th>Ações</th>
+                        </tr>
+                    </thead>
+                    <tbody id="leads-tbody">
+                        <tr>
+                            <td colspan="7">
+                                <div class="empty-state">
+                                    <div class="icon">🗺️</div>
+                                    <h3>Nenhum lead coletado ainda</h3>
+                                    <p>Use o formulário acima para buscar negócios no Google Maps</p>
+                                </div>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal -->
+    <div class="modal-overlay" id="modal-overlay" onclick="closeModal(event)">
+        <div class="modal" id="modal-content">
+            <div class="modal-header">
+                <h3 id="modal-title">Diagnóstico</h3>
+                <button class="modal-close" onclick="closeModal()">&times;</button>
+            </div>
+            <div class="modal-body" id="modal-body"></div>
+        </div>
+    </div>
+
+    <!-- Toast Container -->
+    <div class="toast-container" id="toast-container"></div>
+
+    <script src="app.js"></script>
+</body>
+
+</html>
