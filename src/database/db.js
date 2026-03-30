@@ -1,196 +1,258 @@
-const Database = require('better-sqlite3');
-const path = require('path');
-const fs = require('fs');
+const { Pool } = require('@neondatabase/serverless');
 
-const DATA_DIR = path.join(__dirname, '..', '..', 'data');
-if (!fs.existsSync(DATA_DIR)) {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
+let pool;
+function getPool() {
+  if (!pool) {
+    if (!process.env.DATABASE_URL) {
+      throw new Error('DATABASE_URL não está definido. Configure a connection string do Neon.');
+    }
+    pool = new Pool({ connectionString: process.env.DATABASE_URL });
+  }
+  return pool;
 }
 
-const db = new Database(path.join(DATA_DIR, 'leads.db'));
+let schemaReady;
+function ensureSchema() {
+  if (!schemaReady) {
+    schemaReady = (async () => {
+      const p = getPool();
+      await p.query(`
+        CREATE TABLE IF NOT EXISTS leads (
+          id SERIAL PRIMARY KEY,
+          name TEXT NOT NULL,
+          address TEXT,
+          phone TEXT,
+          website TEXT,
+          email TEXT,
+          whatsapp TEXT,
+          rating DOUBLE PRECISION,
+          reviews_count INTEGER,
+          category TEXT,
+          search_query TEXT,
+          search_location TEXT,
+          has_site INTEGER DEFAULT 0,
+          site_analyzed INTEGER DEFAULT 0,
+          email_sent INTEGER DEFAULT 0,
+          created_at TIMESTAMPTZ DEFAULT NOW()
+        );
+      `);
+      await p.query(`
+        CREATE TABLE IF NOT EXISTS diagnostics (
+          id SERIAL PRIMARY KEY,
+          lead_id INTEGER NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
+          performance_score DOUBLE PRECISION,
+          accessibility_score DOUBLE PRECISION,
+          best_practices_score DOUBLE PRECISION,
+          seo_score DOUBLE PRECISION,
+          has_ssl INTEGER DEFAULT 0,
+          is_responsive INTEGER DEFAULT 0,
+          load_time DOUBLE PRECISION,
+          suggestions JSONB,
+          raw_data JSONB,
+          created_at TIMESTAMPTZ DEFAULT NOW()
+        );
+      `);
+      await p.query(`
+        CREATE TABLE IF NOT EXISTS emails_sent (
+          id SERIAL PRIMARY KEY,
+          lead_id INTEGER NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
+          to_email TEXT NOT NULL,
+          status TEXT DEFAULT 'sent',
+          error_message TEXT,
+          sent_at TIMESTAMPTZ DEFAULT NOW()
+        );
+      `);
+      await p.query(`
+        CREATE TABLE IF NOT EXISTS job_progress (
+          id SMALLINT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+          payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+          updated_at TIMESTAMPTZ DEFAULT NOW()
+        );
+      `);
+      await p.query(`
+        INSERT INTO job_progress (id, payload) VALUES (1, '{}'::jsonb)
+        ON CONFLICT (id) DO NOTHING;
+      `);
+    })();
+  }
+  return schemaReady;
+}
 
-// Enable WAL mode for better performance
-db.pragma('journal_mode = WAL');
-
-// Create tables
-db.exec(`
-  CREATE TABLE IF NOT EXISTS leads (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    address TEXT,
-    phone TEXT,
-    website TEXT,
-    email TEXT,
-    whatsapp TEXT,
-    rating REAL,
-    reviews_count INTEGER,
-    category TEXT,
-    search_query TEXT,
-    search_location TEXT,
-    has_site INTEGER DEFAULT 0,
-    site_analyzed INTEGER DEFAULT 0,
-    email_sent INTEGER DEFAULT 0,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+async function saveJobProgress(data) {
+  await ensureSchema();
+  await getPool().query(
+    `INSERT INTO job_progress (id, payload, updated_at) VALUES (1, $1::jsonb, NOW())
+     ON CONFLICT (id) DO UPDATE SET payload = EXCLUDED.payload, updated_at = NOW()`,
+    [JSON.stringify(data)]
   );
+}
 
-  CREATE TABLE IF NOT EXISTS diagnostics (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    lead_id INTEGER NOT NULL,
-    performance_score REAL,
-    accessibility_score REAL,
-    best_practices_score REAL,
-    seo_score REAL,
-    has_ssl INTEGER DEFAULT 0,
-    is_responsive INTEGER DEFAULT 0,
-    load_time REAL,
-    suggestions TEXT,
-    raw_data TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (lead_id) REFERENCES leads(id)
+async function getJobProgress() {
+  await ensureSchema();
+  const { rows } = await getPool().query(
+    'SELECT payload, updated_at FROM job_progress WHERE id = 1'
   );
-
-  CREATE TABLE IF NOT EXISTS emails_sent (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    lead_id INTEGER NOT NULL,
-    to_email TEXT NOT NULL,
-    status TEXT DEFAULT 'sent',
-    error_message TEXT,
-    sent_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (lead_id) REFERENCES leads(id)
-  );
-`);
-
-// Prepared statements
-const insertLead = db.prepare(`
-  INSERT INTO leads (name, address, phone, website, email, whatsapp, rating, reviews_count, category, search_query, search_location, has_site)
-  VALUES (@name, @address, @phone, @website, @email, @whatsapp, @rating, @reviews_count, @category, @search_query, @search_location, @has_site)
-`);
-
-const updateLeadContact = db.prepare(`
-  UPDATE leads SET email = @email, whatsapp = @whatsapp WHERE id = @id
-`);
-
-const markSiteAnalyzed = db.prepare(`
-  UPDATE leads SET site_analyzed = 1 WHERE id = @id
-`);
-
-const markEmailSent = db.prepare(`
-  UPDATE leads SET email_sent = 1 WHERE id = @id
-`);
-
-const insertDiagnostic = db.prepare(`
-  INSERT INTO diagnostics (lead_id, performance_score, accessibility_score, best_practices_score, seo_score, has_ssl, is_responsive, load_time, suggestions, raw_data)
-  VALUES (@lead_id, @performance_score, @accessibility_score, @best_practices_score, @seo_score, @has_ssl, @is_responsive, @load_time, @suggestions, @raw_data)
-`);
-
-const insertEmailRecord = db.prepare(`
-  INSERT INTO emails_sent (lead_id, to_email, status, error_message)
-  VALUES (@lead_id, @to_email, @status, @error_message)
-`);
+  if (!rows.length) return null;
+  const payload = rows[0].payload;
+  if (!payload || (typeof payload === 'object' && Object.keys(payload).length === 0)) {
+    return null;
+  }
+  return payload;
+}
 
 module.exports = {
-  db,
-
-  insertLead(data) {
-    const result = insertLead.run({
-      name: data.name || '',
-      address: data.address || '',
-      phone: data.phone || '',
-      website: data.website || '',
-      email: data.email || '',
-      whatsapp: data.whatsapp || '',
-      rating: data.rating || null,
-      reviews_count: data.reviews_count || null,
-      category: data.category || '',
-      search_query: data.search_query || '',
-      search_location: data.search_location || '',
-      has_site: data.website ? 1 : 0
-    });
-    return result.lastInsertRowid;
+  async insertLead(data) {
+    await ensureSchema();
+    const { rows } = await getPool().query(
+      `INSERT INTO leads (name, address, phone, website, email, whatsapp, rating, reviews_count, category, search_query, search_location, has_site)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+       RETURNING id`,
+      [
+        data.name || '',
+        data.address || '',
+        data.phone || '',
+        data.website || '',
+        data.email || '',
+        data.whatsapp || '',
+        data.rating ?? null,
+        data.reviews_count ?? null,
+        data.category || '',
+        data.search_query || '',
+        data.search_location || '',
+        data.website ? 1 : 0
+      ]
+    );
+    return rows[0].id;
   },
 
-  updateLeadContact(id, email, whatsapp) {
-    updateLeadContact.run({ id, email: email || '', whatsapp: whatsapp || '' });
+  async updateLeadContact(id, email, whatsapp) {
+    await ensureSchema();
+    await getPool().query(
+      'UPDATE leads SET email = $1, whatsapp = $2 WHERE id = $3',
+      [email || '', whatsapp || '', id]
+    );
   },
 
-  markSiteAnalyzed(id) {
-    markSiteAnalyzed.run({ id });
+  async markSiteAnalyzed(id) {
+    await ensureSchema();
+    await getPool().query('UPDATE leads SET site_analyzed = 1 WHERE id = $1', [id]);
   },
 
-  markEmailSent(id) {
-    markEmailSent.run({ id });
+  async markEmailSent(id) {
+    await ensureSchema();
+    await getPool().query('UPDATE leads SET email_sent = 1 WHERE id = $1', [id]);
   },
 
-  insertDiagnostic(data) {
-    const result = insertDiagnostic.run({
-      lead_id: data.lead_id,
-      performance_score: data.performance_score || null,
-      accessibility_score: data.accessibility_score || null,
-      best_practices_score: data.best_practices_score || null,
-      seo_score: data.seo_score || null,
-      has_ssl: data.has_ssl ? 1 : 0,
-      is_responsive: data.is_responsive ? 1 : 0,
-      load_time: data.load_time || null,
-      suggestions: JSON.stringify(data.suggestions || []),
-      raw_data: JSON.stringify(data.raw_data || {})
-    });
-    return result.lastInsertRowid;
+  async insertDiagnostic(data) {
+    await ensureSchema();
+    const suggestions = data.suggestions || [];
+    const raw = data.raw_data || {};
+    const { rows } = await getPool().query(
+      `INSERT INTO diagnostics (lead_id, performance_score, accessibility_score, best_practices_score, seo_score, has_ssl, is_responsive, load_time, suggestions, raw_data)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10::jsonb)
+       RETURNING id`,
+      [
+        data.lead_id,
+        data.performance_score ?? null,
+        data.accessibility_score ?? null,
+        data.best_practices_score ?? null,
+        data.seo_score ?? null,
+        data.has_ssl ? 1 : 0,
+        data.is_responsive ? 1 : 0,
+        data.load_time ?? null,
+        JSON.stringify(Array.isArray(suggestions) ? suggestions : []),
+        JSON.stringify(typeof raw === 'object' ? raw : {})
+      ]
+    );
+    return rows[0].id;
   },
 
-  insertEmailRecord(data) {
-    insertEmailRecord.run({
-      lead_id: data.lead_id,
-      to_email: data.to_email,
-      status: data.status || 'sent',
-      error_message: data.error_message || null
-    });
+  async insertEmailRecord(data) {
+    await ensureSchema();
+    await getPool().query(
+      `INSERT INTO emails_sent (lead_id, to_email, status, error_message)
+       VALUES ($1, $2, $3, $4)`,
+      [
+        data.lead_id,
+        data.to_email,
+        data.status || 'sent',
+        data.error_message || null
+      ]
+    );
   },
 
-  getLeads(filters = {}) {
+  async getLeads(filters = {}) {
+    await ensureSchema();
     let query = 'SELECT * FROM leads WHERE 1=1';
-    const params = {};
+    const params = [];
+    let n = 1;
 
     if (filters.search_query) {
-      query += ' AND search_query = @search_query';
-      params.search_query = filters.search_query;
+      query += ` AND search_query = $${n++}`;
+      params.push(filters.search_query);
     }
     if (filters.search_location) {
-      query += ' AND search_location = @search_location';
-      params.search_location = filters.search_location;
+      query += ` AND search_location = $${n++}`;
+      params.push(filters.search_location);
     }
     if (filters.has_site !== undefined) {
-      query += ' AND has_site = @has_site';
-      params.has_site = filters.has_site ? 1 : 0;
+      query += ` AND has_site = $${n++}`;
+      params.push(filters.has_site ? 1 : 0);
     }
     if (filters.email_sent !== undefined) {
-      query += ' AND email_sent = @email_sent';
-      params.email_sent = filters.email_sent ? 1 : 0;
+      query += ` AND email_sent = $${n++}`;
+      params.push(filters.email_sent ? 1 : 0);
     }
 
     query += ' ORDER BY created_at DESC';
 
     if (filters.limit) {
-      query += ' LIMIT @limit';
-      params.limit = filters.limit;
+      query += ` LIMIT $${n++}`;
+      params.push(filters.limit);
     }
 
-    return db.prepare(query).all(params);
+    const { rows } = await getPool().query(query, params);
+    return rows;
   },
 
-  getLeadById(id) {
-    return db.prepare('SELECT * FROM leads WHERE id = ?').get(id);
+  async getLeadById(id) {
+    await ensureSchema();
+    const { rows } = await getPool().query('SELECT * FROM leads WHERE id = $1', [id]);
+    return rows[0] || null;
   },
 
-  getDiagnosticByLeadId(leadId) {
-    return db.prepare('SELECT * FROM diagnostics WHERE lead_id = ? ORDER BY created_at DESC LIMIT 1').get(leadId);
+  async getDiagnosticByLeadId(leadId) {
+    await ensureSchema();
+    const { rows } = await getPool().query(
+      'SELECT * FROM diagnostics WHERE lead_id = $1 ORDER BY created_at DESC LIMIT 1',
+      [leadId]
+    );
+    return rows[0] || null;
   },
 
-  getStats() {
-    const total = db.prepare('SELECT COUNT(*) as count FROM leads').get().count;
-    const withSite = db.prepare('SELECT COUNT(*) as count FROM leads WHERE has_site = 1').get().count;
-    const analyzed = db.prepare('SELECT COUNT(*) as count FROM leads WHERE site_analyzed = 1').get().count;
-    const emailed = db.prepare('SELECT COUNT(*) as count FROM leads WHERE email_sent = 1').get().count;
-    const withEmail = db.prepare("SELECT COUNT(*) as count FROM leads WHERE email != ''").get().count;
+  async getStats() {
+    await ensureSchema();
+    const p = getPool();
+    const total = (await p.query('SELECT COUNT(*)::int AS count FROM leads')).rows[0].count;
+    const withSite = (await p.query('SELECT COUNT(*)::int AS count FROM leads WHERE has_site = 1')).rows[0]
+      .count;
+    const analyzed = (await p.query('SELECT COUNT(*)::int AS count FROM leads WHERE site_analyzed = 1')).rows[0]
+      .count;
+    const emailed = (await p.query('SELECT COUNT(*)::int AS count FROM leads WHERE email_sent = 1')).rows[0]
+      .count;
+    const withEmail = (await p.query("SELECT COUNT(*)::int AS count FROM leads WHERE email IS NOT NULL AND email != ''"))
+      .rows[0].count;
     return { total, withSite, analyzed, emailed, withEmail };
-  }
+  },
+
+  async deleteLead(id) {
+    await ensureSchema();
+    const p = getPool();
+    await p.query('DELETE FROM emails_sent WHERE lead_id = $1', [id]);
+    await p.query('DELETE FROM diagnostics WHERE lead_id = $1', [id]);
+    await p.query('DELETE FROM leads WHERE id = $1', [id]);
+  },
+
+  saveJobProgress,
+  getJobProgress
 };

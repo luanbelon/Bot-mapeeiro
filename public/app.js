@@ -1,6 +1,7 @@
 // ============ State ============
 let allLeads = [];
 let currentFilter = 'all';
+let progressPollTimer = null;
 
 // ============ Init ============
 document.addEventListener('DOMContentLoaded', () => {
@@ -8,9 +9,52 @@ document.addEventListener('DOMContentLoaded', () => {
   loadLeads();
   connectSSE();
   checkEmailConfig();
+  syncJobFromServer();
 });
 
-// ============ SSE Progress ============
+async function syncJobFromServer() {
+  try {
+    const res = await fetch('/api/job-status');
+    const data = await res.json();
+    if (data.isRunning) {
+      startProgressPoll();
+      if (data.progress) updateProgress(data.progress);
+      return;
+    }
+    if (data.progress && data.progress.phase && data.progress.phase !== 'done' && data.progress.phase !== 'error') {
+      startProgressPoll();
+      updateProgress(data.progress);
+    }
+  } catch (e) {
+    /* offline */
+  }
+}
+
+function startProgressPoll() {
+  stopProgressPoll();
+  progressPollTimer = setInterval(async () => {
+    try {
+      const res = await fetch('/api/job-status');
+      const data = await res.json();
+      if (data.progress) updateProgress(data.progress);
+      if (!data.isRunning) {
+        const ph = data.progress && data.progress.phase;
+        if (ph === 'done' || ph === 'error') stopProgressPoll();
+      }
+    } catch (e) {
+      /* ignore */
+    }
+  }, 1500);
+}
+
+function stopProgressPoll() {
+  if (progressPollTimer) {
+    clearInterval(progressPollTimer);
+    progressPollTimer = null;
+  }
+}
+
+// ============ SSE Progress (funciona em um único processo; na Vercel o polling cobre o progresso) ============
 function connectSSE() {
   const evtSource = new EventSource('/api/progress');
   evtSource.onmessage = (event) => {
@@ -29,6 +73,7 @@ function updateProgress(data) {
   const fill = document.getElementById('progress-fill');
 
   if (data.phase === 'done' || data.phase === 'error') {
+    stopProgressPoll();
     panel.classList.remove('active');
     document.getElementById('btn-search').disabled = false;
     document.getElementById('btn-search').innerHTML = '🚀 Buscar';
@@ -81,6 +126,8 @@ async function startSearch() {
       showToast(data.error || 'Erro ao iniciar busca', 'error');
       btn.disabled = false;
       btn.innerHTML = '🚀 Buscar';
+    } else {
+      startProgressPoll();
     }
   } catch (err) {
     showToast('Erro de conexão', 'error');
@@ -321,7 +368,7 @@ async function viewDiagnostic(id) {
         </div>
         <div style="flex:1; background:var(--bg-card); border-radius:10px; padding:12px; text-align:center;">
           <div style="font-size:18px;">⏱️</div>
-          <div style="font-size:11px; color:var(--text-muted); margin-top:4px;">${d.load_time ? d.load_time.toFixed(1) + 's' : '—'}</div>
+          <div style="font-size:11px; color:var(--text-muted); margin-top:4px;">${d.load_time != null ? Number(d.load_time).toFixed(1) + 's' : '—'}</div>
         </div>
       </div>
 

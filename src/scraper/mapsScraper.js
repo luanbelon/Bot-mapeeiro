@@ -1,5 +1,3 @@
-const puppeteer = require('puppeteer');
-
 /**
  * Scrape Google Maps for businesses
  * @param {string} query - Business type (e.g., "Restaurantes")
@@ -8,18 +6,11 @@ const puppeteer = require('puppeteer');
  * @returns {Promise<Array>} Array of business objects
  */
 async function scrapeGoogleMaps(query, location, onProgress = () => {}) {
+  const { launchBrowser } = require('./puppeteerLaunch');
   const searchTerm = `${query} em ${location}`;
   onProgress({ step: 'init', message: `Iniciando busca: "${searchTerm}"` });
 
-  const browser = await puppeteer.launch({
-    headless: 'new',
-    args: [
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-dev-shm-usage',
-      '--lang=pt-BR'
-    ]
-  });
+  const browser = await launchBrowser();
 
   const businesses = [];
 
@@ -30,38 +21,37 @@ async function scrapeGoogleMaps(query, location, onProgress = () => {}) {
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     );
 
-    // Navigate to Google Maps search
     const url = `https://www.google.com/maps/search/${encodeURIComponent(searchTerm)}`;
     onProgress({ step: 'navigating', message: 'Abrindo Google Maps...' });
     await page.goto(url, { waitUntil: 'networkidle2', timeout: 60000 });
 
-    // Wait for results to load
     await delay(3000);
 
-    // Accept cookies if prompted
     try {
       const acceptBtn = await page.$('button[aria-label="Aceitar tudo"]');
       if (acceptBtn) await acceptBtn.click();
       await delay(1000);
-    } catch (e) { /* no cookie prompt */ }
+    } catch (e) {
+      /* no cookie prompt */
+    }
 
-    // Scroll the results panel to load more items
     onProgress({ step: 'scrolling', message: 'Carregando resultados...' });
 
     const resultsSelector = 'div[role="feed"]';
     await page.waitForSelector(resultsSelector, { timeout: 15000 }).catch(() => null);
 
-    // Scroll to load more results (up to 5 scroll attempts)
     for (let i = 0; i < 5; i++) {
       await page.evaluate((sel) => {
         const feed = document.querySelector(sel);
         if (feed) feed.scrollTop = feed.scrollHeight;
       }, resultsSelector);
       await delay(2000 + Math.random() * 2000);
-      onProgress({ step: 'scrolling', message: `Scroll ${i + 1}/5 - carregando mais resultados...` });
+      onProgress({
+        step: 'scrolling',
+        message: `Scroll ${i + 1}/5 - carregando mais resultados...`
+      });
     }
 
-    // Extract business data from the results list
     onProgress({ step: 'extracting', message: 'Extraindo dados dos negócios...' });
 
     const results = await page.evaluate(() => {
@@ -77,26 +67,21 @@ async function scrapeGoogleMaps(query, location, onProgress = () => {}) {
           const name = nameEl ? nameEl.textContent.trim() : '';
           if (!name) return;
 
-          // Get all text content
           const allText = container.textContent;
 
-          // Rating
           const ratingMatch = allText.match(/(\d[.,]\d)\s*\(/);
           const rating = ratingMatch ? parseFloat(ratingMatch[1].replace(',', '.')) : null;
 
-          // Reviews count
           const reviewsMatch = allText.match(/\((\d[\d.]*)\)/);
-          const reviewsCount = reviewsMatch ? parseInt(reviewsMatch[1].replace('.', '')) : null;
+          const reviewsCount = reviewsMatch ? parseInt(reviewsMatch[1].replace('.', ''), 10) : null;
 
-          // Get the href for later navigation
           const href = link.getAttribute('href') || '';
 
-          // Category and address from the text spans
           const spans = container.querySelectorAll('.fontBodyMedium span');
           let category = '';
           let address = '';
 
-          spans.forEach(span => {
+          spans.forEach((span) => {
             const t = span.textContent.trim();
             if (t.startsWith('·')) return;
             if (!category && t.length > 2 && !t.includes('Aberto') && !t.includes('Fechado') && !t.match(/^\d/)) {
@@ -108,15 +93,19 @@ async function scrapeGoogleMaps(query, location, onProgress = () => {}) {
           });
 
           items.push({ name, rating, reviewsCount, category, address, href });
-        } catch (e) { /* skip item */ }
+        } catch (e) {
+          /* skip item */
+        }
       });
 
       return items;
     });
 
-    onProgress({ step: 'details', message: `Encontrados ${results.length} negócios. Coletando detalhes...` });
+    onProgress({
+      step: 'details',
+      message: `Encontrados ${results.length} negócios. Coletando detalhes...`
+    });
 
-    // Visit each business page for details (phone, website)
     for (let i = 0; i < results.length; i++) {
       const biz = results[i];
       onProgress({
@@ -135,20 +124,19 @@ async function scrapeGoogleMaps(query, location, onProgress = () => {}) {
             let phone = '';
             let website = '';
 
-            // Look for phone number
-            const phoneBtn = document.querySelector('button[data-tooltip="Copiar o número de telefone"]') ||
-                             document.querySelector('button[aria-label*="Telefone"]') ||
-                             document.querySelector('a[href^="tel:"]');
+            const phoneBtn =
+              document.querySelector('button[data-tooltip="Copiar o número de telefone"]') ||
+              document.querySelector('button[aria-label*="Telefone"]') ||
+              document.querySelector('a[href^="tel:"]');
             if (phoneBtn) {
               const phoneText = phoneBtn.getAttribute('aria-label') || phoneBtn.textContent;
               const phoneMatch = phoneText.match(/[\d\s()+\-]{8,}/);
               if (phoneMatch) phone = phoneMatch[0].trim();
             }
 
-            // Alternative phone search
             if (!phone) {
               const allButtons = document.querySelectorAll('button[data-item-id]');
-              allButtons.forEach(btn => {
+              allButtons.forEach((btn) => {
                 const itemId = btn.getAttribute('data-item-id') || '';
                 if (itemId.startsWith('phone:')) {
                   phone = itemId.replace('phone:tel:', '').replace('phone:', '');
@@ -156,18 +144,17 @@ async function scrapeGoogleMaps(query, location, onProgress = () => {}) {
               });
             }
 
-            // Look for website
-            const websiteLink = document.querySelector('a[data-item-id="authority"]') ||
-                                document.querySelector('a[aria-label*="Site"]') ||
-                                document.querySelector('a[aria-label*="Website"]');
+            const websiteLink =
+              document.querySelector('a[data-item-id="authority"]') ||
+              document.querySelector('a[aria-label*="Site"]') ||
+              document.querySelector('a[aria-label*="Website"]');
             if (websiteLink) {
               website = websiteLink.getAttribute('href') || '';
             }
 
-            // Alternative website search
             if (!website) {
               const allLinks = document.querySelectorAll('a[data-item-id]');
-              allLinks.forEach(link => {
+              allLinks.forEach((link) => {
                 const itemId = link.getAttribute('data-item-id') || '';
                 if (itemId === 'authority') {
                   website = link.getAttribute('href') || link.textContent.trim();
@@ -175,9 +162,10 @@ async function scrapeGoogleMaps(query, location, onProgress = () => {}) {
               });
             }
 
-            // Get address from the detail page
             const addressBtn = document.querySelector('button[data-item-id="address"]');
-            const address = addressBtn ? (addressBtn.getAttribute('aria-label') || '').replace('Endereço: ', '') : '';
+            const address = addressBtn
+              ? (addressBtn.getAttribute('aria-label') || '').replace('Endereço: ', '')
+              : '';
 
             return { phone, website, address };
           });
@@ -198,9 +186,7 @@ async function scrapeGoogleMaps(query, location, onProgress = () => {}) {
           email: '',
           whatsapp: ''
         });
-
       } catch (err) {
-        // Still add the business with whatever data we have
         businesses.push({
           name: biz.name,
           address: biz.address || '',
@@ -215,8 +201,10 @@ async function scrapeGoogleMaps(query, location, onProgress = () => {}) {
       }
     }
 
-    onProgress({ step: 'done', message: `Busca concluída! ${businesses.length} negócios encontrados.` });
-
+    onProgress({
+      step: 'done',
+      message: `Busca concluída! ${businesses.length} negócios encontrados.`
+    });
   } catch (error) {
     onProgress({ step: 'error', message: `Erro: ${error.message}` });
     throw error;
@@ -228,7 +216,7 @@ async function scrapeGoogleMaps(query, location, onProgress = () => {}) {
 }
 
 function delay(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 module.exports = { scrapeGoogleMaps };

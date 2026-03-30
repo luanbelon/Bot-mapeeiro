@@ -62,7 +62,7 @@ async function sendDiagnosticEmail(lead, diagnostic) {
       seoScore: diagnostic.seo_score,
       hasSSL: diagnostic.has_ssl,
       isResponsive: diagnostic.is_responsive,
-      loadTime: diagnostic.load_time ? diagnostic.load_time.toFixed(1) : 'N/A',
+      loadTime: diagnostic.load_time != null ? Number(diagnostic.load_time).toFixed(1) : 'N/A',
       suggestions: suggestions,
       companyName: process.env.COMPANY_NAME || 'Nossa Empresa',
       contactEmail: process.env.CONTACT_EMAIL || process.env.GMAIL_USER,
