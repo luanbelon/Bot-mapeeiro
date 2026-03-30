@@ -332,11 +332,16 @@ async function viewDiagnostic(id) {
 
     const d = data.diagnostic;
     const suggestions = typeof d.suggestions === 'string' ? JSON.parse(d.suggestions) : (d.suggestions || []);
+    const rawParsed = parseDiagnosticRaw(d);
+    const metricsSection = buildLighthouseMetricsSection(rawParsed, data.website);
 
     document.getElementById('modal-title').textContent = `📊 Diagnóstico - ${data.name}`;
     document.getElementById('modal-body').innerHTML = `
-      <p style="color:var(--text-muted); font-size:13px; margin-bottom:16px;">
-        Site: <a href="${data.website}" target="_blank" style="color:var(--accent);">${data.website}</a>
+      <p style="color:var(--text-muted); font-size:13px; margin-bottom:8px;">
+        Site: <a href="${data.website}" target="_blank" rel="noopener" style="color:var(--accent);">${escapeHtml(data.website)}</a>
+      </p>
+      <p style="color:var(--text-muted); font-size:11px; margin-bottom:16px;">
+        Motor de análise: <strong style="color:var(--text-secondary);">Google PageSpeed Insights</strong> (Lighthouse, estratégia mobile).
       </p>
       <div class="score-grid">
         <div class="score-item">
@@ -371,6 +376,8 @@ async function viewDiagnostic(id) {
           <div style="font-size:11px; color:var(--text-muted); margin-top:4px;">${d.load_time != null ? Number(d.load_time).toFixed(1) + 's' : '—'}</div>
         </div>
       </div>
+
+      ${metricsSection}
 
       ${suggestions.length > 0 ? `
         <h4 style="font-size:14px; margin-bottom:12px;">📋 Sugestões de Melhoria</h4>
@@ -476,4 +483,60 @@ function getScoreColor(score) {
   if (score >= 90) return 'var(--green)';
   if (score >= 50) return 'var(--yellow)';
   return 'var(--red)';
+}
+
+function parseDiagnosticRaw(diagnostic) {
+  const raw = diagnostic.raw_data;
+  if (raw == null) return null;
+  if (typeof raw === 'string') {
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  }
+  return typeof raw === 'object' ? raw : null;
+}
+
+function buildLighthouseMetricsSection(raw, websiteUrl) {
+  if (!raw || typeof raw !== 'object') return '';
+
+  const pairs = [
+    ['firstContentfulPaint', 'FCP — Primeira pintura de conteúdo'],
+    ['largestContentfulPaint', 'LCP — Maior elemento visível'],
+    ['totalBlockingTime', 'TBT — Bloqueio da thread principal'],
+    ['cumulativeLayoutShift', 'CLS — Estabilidade do layout'],
+    ['speedIndex', 'Speed Index'],
+    ['interactive', 'TTI — Tempo até interativo']
+  ];
+
+  const rows = [];
+  for (const [key, label] of pairs) {
+    const v = raw[key];
+    if (v != null && String(v).trim() !== '') {
+      rows.push(`
+        <div class="metric-row">
+          <span class="metric-row-label">${label}</span>
+          <span class="metric-row-value">${escapeHtml(String(v))}</span>
+        </div>`);
+    }
+  }
+
+  if (rows.length === 0) return '';
+
+  let fullUrl = websiteUrl || '';
+  if (fullUrl && !fullUrl.startsWith('http')) fullUrl = 'https://' + fullUrl;
+  const psHref = fullUrl
+    ? `https://pagespeed.web.dev/report?url=${encodeURIComponent(fullUrl)}`
+    : 'https://pagespeed.web.dev/';
+
+  return `
+    <div class="lighthouse-block">
+      <h4 class="lighthouse-block-title">📈 Core Web Vitals e métricas Lighthouse</h4>
+      <p class="lighthouse-block-sub">
+        Valores medidos no teste mobile. Relatório completo no Google:
+        <a href="${psHref}" target="_blank" rel="noopener">abrir no PageSpeed Insights</a>
+      </p>
+      <div class="metric-table">${rows.join('')}</div>
+    </div>`;
 }
