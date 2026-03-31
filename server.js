@@ -1,6 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const path = require('path');
+const crypto = require('crypto');
 const db = require('./src/database/db');
 const orchestrator = require('./src/orchestrator');
 const { analyzeSite } = require('./src/analyzer/siteAnalyzer');
@@ -10,6 +11,98 @@ const { sendDiagnosticEmail, sendTestEmail, initMailer } = require('./src/mailer
 const app = express();
 
 app.use(express.json());
+
+const AUTH_COOKIE_NAME = 'bot_mapeeiro_session';
+const LOGIN_USER = process.env.LOGIN_USER || 'luanbelon';
+const LOGIN_PASSWORD = process.env.LOGIN_PASSWORD || 'Lulos0812@';
+const activeSessions = new Set();
+
+function parseCookies(req) {
+  const raw = req.headers.cookie || '';
+  return raw
+    .split(';')
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .reduce((acc, part) => {
+      const i = part.indexOf('=');
+      if (i === -1) return acc;
+      const key = part.slice(0, i).trim();
+      const val = decodeURIComponent(part.slice(i + 1).trim());
+      acc[key] = val;
+      return acc;
+    }, {});
+}
+
+function getSessionToken(req) {
+  const cookies = parseCookies(req);
+  return cookies[AUTH_COOKIE_NAME];
+}
+
+function isAuthenticated(req) {
+  const token = getSessionToken(req);
+  return !!(token && activeSessions.has(token));
+}
+
+function requireAuth(req, res, next) {
+  if (isAuthenticated(req)) return next();
+  return res.status(401).json({ error: 'Não autenticado' });
+}
+
+app.get('/login', (req, res) => {
+  if (isAuthenticated(req)) {
+    return res.redirect('/');
+  }
+  return res.sendFile(path.join(__dirname, 'public', 'login.html'));
+});
+
+app.post('/api/login', (req, res) => {
+  const { username, password } = req.body || {};
+  if (username !== LOGIN_USER || password !== LOGIN_PASSWORD) {
+    return res.status(401).json({ success: false, error: 'Usuário ou senha inválidos' });
+  }
+
+  const token = crypto.randomBytes(32).toString('hex');
+  activeSessions.add(token);
+  res.setHeader(
+    'Set-Cookie',
+    `${AUTH_COOKIE_NAME}=${encodeURIComponent(token)}; HttpOnly; Path=/; SameSite=Lax`
+  );
+  return res.json({ success: true });
+});
+
+app.post('/api/logout', (req, res) => {
+  const token = getSessionToken(req);
+  if (token) activeSessions.delete(token);
+  res.setHeader(
+    'Set-Cookie',
+    `${AUTH_COOKIE_NAME}=; HttpOnly; Path=/; Max-Age=0; SameSite=Lax`
+  );
+  return res.json({ success: true });
+});
+
+app.get('/api/auth-status', (req, res) => {
+  return res.json({ authenticated: isAuthenticated(req) });
+});
+
+app.use('/api', (req, res, next) => {
+  if (req.path === '/login' || req.path === '/auth-status') return next();
+  return requireAuth(req, res, next);
+});
+
+app.get('/', (req, res) => {
+  if (!isAuthenticated(req)) {
+    return res.redirect('/login');
+  }
+  return res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+app.get('/index.html', (req, res) => {
+  if (!isAuthenticated(req)) {
+    return res.redirect('/login');
+  }
+  return res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
 app.use(express.static(path.join(__dirname, 'public')));
 
 let sseClients = [];

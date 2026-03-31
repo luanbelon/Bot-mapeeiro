@@ -5,12 +5,33 @@ let progressPollTimer = null;
 
 // ============ Init ============
 document.addEventListener('DOMContentLoaded', () => {
+  initApp();
+});
+
+async function initApp() {
+  const isAuth = await ensureAuthenticated();
+  if (!isAuth) return;
   loadStats();
   loadLeads();
   connectSSE();
   checkEmailConfig();
   syncJobFromServer();
-});
+}
+
+async function ensureAuthenticated() {
+  try {
+    const res = await fetch('/api/auth-status');
+    const data = await res.json();
+    if (!data.authenticated) {
+      window.location.href = '/login';
+      return false;
+    }
+    return true;
+  } catch {
+    window.location.href = '/login';
+    return false;
+  }
+}
 
 async function syncJobFromServer() {
   try {
@@ -323,15 +344,33 @@ async function deleteLead(id) {
 async function viewDiagnostic(id) {
   try {
     const res = await fetch(`/api/leads/${id}`);
+    if (res.status === 401) {
+      window.location.href = '/login';
+      return;
+    }
     const data = await res.json();
 
     if (!data.diagnostic) {
-      showToast('Diagnóstico não encontrado', 'error');
-      return;
+      if (data.website) {
+        showToast('Diagnóstico antigo sem dados. Reanalisando o site...', 'info');
+        const refreshRes = await fetch(`/api/analyze/${id}`, { method: 'POST' });
+        const refreshData = await refreshRes.json();
+        if (refreshRes.ok && refreshData.success && refreshData.diagnostic) {
+          data.diagnostic = refreshData.diagnostic;
+          loadLeads();
+          loadStats();
+        } else {
+          showToast('Diagnóstico não encontrado', 'error');
+          return;
+        }
+      } else {
+        showToast('Diagnóstico não encontrado', 'error');
+        return;
+      }
     }
 
-    const d = data.diagnostic;
-    const suggestions = typeof d.suggestions === 'string' ? JSON.parse(d.suggestions) : (d.suggestions || []);
+    const d = normalizeDiagnostic(data.diagnostic);
+    const suggestions = safeParseSuggestions(d.suggestions);
     const rawParsed = parseDiagnosticRaw(d);
     const metricsSection = buildLighthouseMetricsSection(rawParsed, data.website);
 
@@ -396,6 +435,15 @@ async function viewDiagnostic(id) {
   } catch (err) {
     showToast('Erro ao carregar diagnóstico', 'error');
   }
+}
+
+async function logout() {
+  try {
+    await fetch('/api/logout', { method: 'POST' });
+  } catch (err) {
+    // ignore and redirect anyway
+  }
+  window.location.href = '/login';
 }
 
 // ============ Email Test ============
@@ -496,6 +544,42 @@ function parseDiagnosticRaw(diagnostic) {
     }
   }
   return typeof raw === 'object' ? raw : null;
+}
+
+function safeParseSuggestions(value) {
+  if (!value) return [];
+  if (Array.isArray(value)) return value;
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
+function normalizeDiagnostic(diagnostic) {
+  const raw = parseDiagnosticRaw(diagnostic);
+  const categories = raw && raw.lighthouseResult && raw.lighthouseResult.categories
+    ? raw.lighthouseResult.categories
+    : null;
+
+  const pickScore = (current, key) => {
+    if (current !== null && current !== undefined) return current;
+    const score = categories && categories[key] ? categories[key].score : null;
+    if (typeof score !== 'number') return null;
+    return Math.round(score * 100);
+  };
+
+  return {
+    ...diagnostic,
+    performance_score: pickScore(diagnostic.performance_score, 'performance'),
+    accessibility_score: pickScore(diagnostic.accessibility_score, 'accessibility'),
+    best_practices_score: pickScore(diagnostic.best_practices_score, 'best-practices'),
+    seo_score: pickScore(diagnostic.seo_score, 'seo')
+  };
 }
 
 function buildLighthouseMetricsSection(raw, websiteUrl) {
