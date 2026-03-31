@@ -15,7 +15,8 @@ app.use(express.json());
 const AUTH_COOKIE_NAME = 'bot_mapeeiro_session';
 const LOGIN_USER = process.env.LOGIN_USER || 'luanbelon';
 const LOGIN_PASSWORD = process.env.LOGIN_PASSWORD || 'Lulos0812@';
-const activeSessions = new Set();
+const AUTH_SECRET = process.env.AUTH_SECRET || 'bot-mapeeiro-secret-change-me';
+const SESSION_MAX_AGE_SECONDS = 60 * 60 * 12; // 12 horas
 
 function parseCookies(req) {
   const raw = req.headers.cookie || '';
@@ -38,9 +39,60 @@ function getSessionToken(req) {
   return cookies[AUTH_COOKIE_NAME];
 }
 
+function toBase64Url(value) {
+  return Buffer.from(value)
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '');
+}
+
+function fromBase64Url(value) {
+  const base = value.replace(/-/g, '+').replace(/_/g, '/');
+  const padded = base + '='.repeat((4 - (base.length % 4)) % 4);
+  return Buffer.from(padded, 'base64').toString('utf8');
+}
+
+function signPayload(payload) {
+  return crypto
+    .createHmac('sha256', AUTH_SECRET)
+    .update(payload)
+    .digest('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '');
+}
+
+function generateSessionToken(username) {
+  const payload = JSON.stringify({
+    u: username,
+    e: Math.floor(Date.now() / 1000) + SESSION_MAX_AGE_SECONDS
+  });
+  const encoded = toBase64Url(payload);
+  const signature = signPayload(encoded);
+  return `${encoded}.${signature}`;
+}
+
+function verifySessionToken(token) {
+  if (!token || typeof token !== 'string') return false;
+  const parts = token.split('.');
+  if (parts.length !== 2) return false;
+  const [encoded, signature] = parts;
+  const expected = signPayload(encoded);
+  if (signature !== expected) return false;
+
+  try {
+    const data = JSON.parse(fromBase64Url(encoded));
+    if (!data || data.u !== LOGIN_USER || !data.e) return false;
+    return Math.floor(Date.now() / 1000) < data.e;
+  } catch {
+    return false;
+  }
+}
+
 function isAuthenticated(req) {
   const token = getSessionToken(req);
-  return !!(token && activeSessions.has(token));
+  return verifySessionToken(token);
 }
 
 function requireAuth(req, res, next) {
@@ -61,21 +113,20 @@ app.post('/api/login', (req, res) => {
     return res.status(401).json({ success: false, error: 'Usuário ou senha inválidos' });
   }
 
-  const token = crypto.randomBytes(32).toString('hex');
-  activeSessions.add(token);
+  const token = generateSessionToken(username);
+  const secureFlag = process.env.NODE_ENV === 'production' || !!process.env.VERCEL ? '; Secure' : '';
   res.setHeader(
     'Set-Cookie',
-    `${AUTH_COOKIE_NAME}=${encodeURIComponent(token)}; HttpOnly; Path=/; SameSite=Lax`
+    `${AUTH_COOKIE_NAME}=${encodeURIComponent(token)}; HttpOnly; Path=/; Max-Age=${SESSION_MAX_AGE_SECONDS}; SameSite=Lax${secureFlag}`
   );
   return res.json({ success: true });
 });
 
 app.post('/api/logout', (req, res) => {
-  const token = getSessionToken(req);
-  if (token) activeSessions.delete(token);
+  const secureFlag = process.env.NODE_ENV === 'production' || !!process.env.VERCEL ? '; Secure' : '';
   res.setHeader(
     'Set-Cookie',
-    `${AUTH_COOKIE_NAME}=; HttpOnly; Path=/; Max-Age=0; SameSite=Lax`
+    `${AUTH_COOKIE_NAME}=; HttpOnly; Path=/; Max-Age=0; SameSite=Lax${secureFlag}`
   );
   return res.json({ success: true });
 });
