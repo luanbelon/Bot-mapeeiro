@@ -107,18 +107,26 @@
         <div class="leads-panel">
             <div class="leads-header">
                 <h2>📋 Leads Coletados</h2>
-                <div class="leads-filters">
-                    <button class="filter-btn active" onclick="filterLeads('all', this)">Todos</button>
-                    <button class="filter-btn" onclick="filterLeads('with-site', this)">Com Site</button>
-                    <button class="filter-btn" onclick="filterLeads('with-email', this)">Com Email</button>
-                    <button class="filter-btn" onclick="filterLeads('analyzed', this)">Analisados</button>
-                    <button class="filter-btn" onclick="filterLeads('emailed', this)">Enviados</button>
+                <div class="leads-header-actions">
+                    <div class="leads-filters">
+                        <button class="filter-btn active" onclick="filterLeads('all', this)">Todos</button>
+                        <button class="filter-btn" onclick="filterLeads('with-site', this)">Com Site</button>
+                        <button class="filter-btn" onclick="filterLeads('with-email', this)">Com Email</button>
+                        <button class="filter-btn" onclick="filterLeads('analyzed', this)">Analisados</button>
+                        <button class="filter-btn" onclick="filterLeads('emailed', this)">Enviados</button>
+                    </div>
+                    <button class="btn btn-danger btn-sm" id="btn-delete-selected" onclick="deleteSelectedLeads()" disabled>
+                        🗑 Excluir selecionados (0)
+                    </button>
                 </div>
             </div>
             <div class="leads-table-wrapper">
                 <table class="leads-table">
                     <thead>
                         <tr>
+                            <th class="select-col">
+                                <input type="checkbox" id="select-all-leads" onclick="toggleSelectAllFiltered(this.checked)">
+                            </th>
                             <th>Nome</th>
                             <th>Telefone</th>
                             <th>Email</th>
@@ -130,7 +138,7 @@
                     </thead>
                     <tbody id="leads-tbody">
                         <tr>
-                            <td colspan="7">
+                            <td colspan="8">
                                 <div class="empty-state">
                                     <div class="icon">🗺️</div>
                                     <h3>Nenhum lead coletado ainda</h3>

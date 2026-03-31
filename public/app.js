@@ -2,6 +2,7 @@
 let allLeads = [];
 let currentFilter = 'all';
 let progressPollTimer = null;
+let selectedLeadIds = new Set();
 
 // ============ Init ============
 document.addEventListener('DOMContentLoaded', () => {
@@ -202,28 +203,28 @@ function filterLeads(filter, btn) {
   renderLeads();
 }
 
-function renderLeads() {
-  const tbody = document.getElementById('leads-tbody');
-  let filtered = allLeads;
-
+function getFilteredLeads() {
   switch (currentFilter) {
     case 'with-site':
-      filtered = allLeads.filter(l => l.has_site);
-      break;
+      return allLeads.filter(l => l.has_site);
     case 'with-email':
-      filtered = allLeads.filter(l => l.email);
-      break;
+      return allLeads.filter(l => l.email);
     case 'analyzed':
-      filtered = allLeads.filter(l => l.site_analyzed);
-      break;
+      return allLeads.filter(l => l.site_analyzed);
     case 'emailed':
-      filtered = allLeads.filter(l => l.email_sent);
-      break;
+      return allLeads.filter(l => l.email_sent);
+    default:
+      return allLeads;
   }
+}
+
+function renderLeads() {
+  const tbody = document.getElementById('leads-tbody');
+  const filtered = getFilteredLeads();
 
   if (filtered.length === 0) {
     tbody.innerHTML = `
-      <tr><td colspan="7">
+      <tr><td colspan="8">
         <div class="empty-state">
           <div class="icon">📭</div>
           <h3>Nenhum lead encontrado</h3>
@@ -231,11 +232,20 @@ function renderLeads() {
         </div>
       </td></tr>
     `;
+    updateSelectionControls();
     return;
   }
 
   tbody.innerHTML = filtered.map(lead => `
     <tr data-id="${lead.id}">
+      <td class="select-col">
+        <input
+          type="checkbox"
+          class="row-select"
+          ${selectedLeadIds.has(lead.id) ? 'checked' : ''}
+          onchange="toggleLeadSelection(${lead.id}, this.checked)"
+        >
+      </td>
       <td class="lead-name" title="${escapeHtml(lead.name)}">${escapeHtml(lead.name)}</td>
       <td>${lead.phone ? `<a href="tel:${lead.phone}" style="color:var(--cyan);text-decoration:none;">${escapeHtml(lead.phone)}</a>` : '<span style="color:var(--text-muted)">—</span>'}</td>
       <td>${lead.email ? `<a href="mailto:${lead.email}" style="color:var(--accent);text-decoration:none;" title="${lead.email}">${truncate(lead.email, 25)}</a>` : '<span style="color:var(--text-muted)">—</span>'}</td>
@@ -257,6 +267,8 @@ function renderLeads() {
       </td>
     </tr>
   `).join('');
+
+  updateSelectionControls();
 }
 
 function getStatusBadges(lead) {
@@ -333,11 +345,70 @@ async function deleteLead(id) {
   if (!confirm('Remover este lead?')) return;
   try {
     await fetch(`/api/leads/${id}`, { method: 'DELETE' });
+    selectedLeadIds.delete(id);
     showToast('Lead removido', 'info');
     loadLeads();
     loadStats();
   } catch (err) {
     showToast('Erro ao remover', 'error');
+  }
+}
+
+function toggleLeadSelection(id, checked) {
+  if (checked) selectedLeadIds.add(id);
+  else selectedLeadIds.delete(id);
+  updateSelectionControls();
+}
+
+function toggleSelectAllFiltered(checked) {
+  const filteredIds = getFilteredLeads().map((l) => l.id);
+  if (checked) {
+    filteredIds.forEach((id) => selectedLeadIds.add(id));
+  } else {
+    filteredIds.forEach((id) => selectedLeadIds.delete(id));
+  }
+  renderLeads();
+}
+
+function updateSelectionControls() {
+  const btn = document.getElementById('btn-delete-selected');
+  const selectAll = document.getElementById('select-all-leads');
+  if (!btn || !selectAll) return;
+
+  const filteredIds = getFilteredLeads().map((l) => l.id);
+  const selectedVisibleCount = filteredIds.filter((id) => selectedLeadIds.has(id)).length;
+  const selectedTotalCount = selectedLeadIds.size;
+
+  btn.disabled = selectedTotalCount === 0;
+  btn.textContent = `🗑 Excluir selecionados (${selectedTotalCount})`;
+  selectAll.checked = filteredIds.length > 0 && selectedVisibleCount === filteredIds.length;
+  selectAll.indeterminate = selectedVisibleCount > 0 && selectedVisibleCount < filteredIds.length;
+}
+
+async function deleteSelectedLeads() {
+  const ids = Array.from(selectedLeadIds);
+  if (ids.length === 0) return;
+  if (!confirm(`Remover ${ids.length} lead(s) selecionado(s)?`)) return;
+
+  try {
+    const results = await Promise.allSettled(
+      ids.map((id) => fetch(`/api/leads/${id}`, { method: 'DELETE' }))
+    );
+    const successCount = results.filter((r) => r.status === 'fulfilled').length;
+    const failCount = results.length - successCount;
+
+    if (successCount > 0) {
+      ids.forEach((id) => selectedLeadIds.delete(id));
+      showToast(`${successCount} lead(s) removido(s)`, 'success');
+      loadLeads();
+      loadStats();
+    }
+    if (failCount > 0) {
+      showToast(`${failCount} exclusão(ões) falharam`, 'error');
+    }
+    updateSelectionControls();
+  } catch (err) {
+    showToast('Erro ao excluir selecionados', 'error');
   }
 }
 

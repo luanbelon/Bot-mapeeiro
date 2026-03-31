@@ -571,6 +571,12 @@ body::before {
   gap: 10px;
 }
 
+.leads-header-actions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
 .filter-btn {
   padding: 6px 14px;
   font-size: 12px;
@@ -608,6 +614,19 @@ body::before {
   border-bottom: 1px solid var(--border);
   background: rgba(0,0,0,0.2);
   white-space: nowrap;
+}
+
+.select-col {
+  width: 44px;
+  min-width: 44px;
+  text-align: center !important;
+}
+
+.select-col input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  accent-color: var(--accent);
 }
 
 .leads-table td {
@@ -876,6 +895,12 @@ body::before {
   .leads-header {
     flex-direction: column;
     gap: 12px;
+  }
+
+  .leads-header-actions {
+    width: 100%;
+    flex-direction: column;
+    align-items: flex-start;
   }
 }
 
