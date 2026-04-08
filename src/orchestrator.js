@@ -1,6 +1,5 @@
 const { scrapeGoogleMaps } = require('./scraper/mapsScraper');
 const { scrapeContacts } = require('./scraper/contactScraper');
-const { sendDiagnosticEmail } = require('./mailer/mailer');
 const db = require('./database/db');
 const EventEmitter = require('events');
 
@@ -13,7 +12,7 @@ class Orchestrator extends EventEmitter {
   }
 
   /**
-   * Run the full pipeline: Search → Scrape Contacts → Email
+   * Run the full pipeline: Search → Scrape Contacts
    */
   async runFullPipeline(query, location, options = {}) {
     if (this.isRunning) {
@@ -25,7 +24,6 @@ class Orchestrator extends EventEmitter {
     this.currentSearch = { query, location };
 
     const {
-      autoEmail = false,
       scrapeContacts: shouldScrapeContacts = true,
       maxResults = 20
     } = options;
@@ -107,52 +105,6 @@ class Orchestrator extends EventEmitter {
           }
 
           await delay(1000 + Math.random() * 2000);
-        }
-      }
-
-      if (this.shouldStop) return this.stopResult();
-
-      if (autoEmail) {
-        const leadsToEmail = [];
-        for (const id of leadIds) {
-          const lead = await db.getLeadById(id);
-          if (lead && lead.email && lead.site_analyzed && !lead.email_sent) {
-            leadsToEmail.push(lead);
-          }
-        }
-
-        for (let i = 0; i < leadsToEmail.length; i++) {
-          if (this.shouldStop) return this.stopResult();
-
-          const lead = leadsToEmail[i];
-          const diagnostic = await db.getDiagnosticByLeadId(lead.id);
-
-          if (!diagnostic) continue;
-
-          this.emit('progress', {
-            phase: 'emailing',
-            message: `Enviando email: ${lead.name} (${i + 1}/${leadsToEmail.length})`,
-            percent: 85 + Math.round((i / leadsToEmail.length) * 14),
-            current: i + 1,
-            total: leadsToEmail.length
-          });
-
-          try {
-            const result = await sendDiagnosticEmail(lead, diagnostic);
-            await db.insertEmailRecord({
-              lead_id: lead.id,
-              to_email: lead.email,
-              status: result.success ? 'sent' : 'failed',
-              error_message: result.error || null
-            });
-            if (result.success) {
-              await db.markEmailSent(lead.id);
-            }
-          } catch (err) {
-            console.error(`Erro ao enviar email para ${lead.name}:`, err.message);
-          }
-
-          await delay(2000 + Math.random() * 3000);
         }
       }
 

@@ -15,7 +15,6 @@ async function initApp() {
   loadStats();
   loadLeads();
   connectSSE();
-  checkEmailConfig();
   syncJobFromServer();
 }
 
@@ -54,7 +53,10 @@ function startProgressPoll() {
       const res = await fetch('/api/job-status');
       const data = await res.json();
       if (data.progress) updateProgress(data.progress);
-      if (!data.isRunning) stopProgressPoll();
+      if (!data.isRunning) {
+        stopProgressPoll();
+        resetSearchUI();
+      }
     } catch (e) {
       /* ignore */
     }
@@ -88,11 +90,7 @@ function updateProgress(data) {
 
   if (data.phase === 'done' || data.phase === 'error') {
     stopProgressPoll();
-    panel.classList.remove('active');
-    document.getElementById('btn-search').disabled = false;
-    document.getElementById('btn-search').innerHTML = '🚀 Buscar';
-    loadStats();
-    loadLeads();
+    resetSearchUI();
 
     if (data.phase === 'done') {
       showToast('Busca concluída com sucesso!', 'success');
@@ -132,8 +130,7 @@ async function startSearch() {
         query,
         location,
         maxResults,
-        scrapeContacts: document.getElementById('opt-contacts').checked,
-        autoEmail: document.getElementById('opt-email').checked
+        scrapeContacts: document.getElementById('opt-contacts').checked
       })
     });
 
@@ -156,9 +153,22 @@ async function stopSearch() {
   try {
     await fetch('/api/stop', { method: 'POST' });
     showToast('Parando busca...', 'info');
+    startProgressPoll();
   } catch (err) {
     showToast('Erro ao parar', 'error');
   }
+}
+
+function resetSearchUI() {
+  const panel = document.getElementById('progress-panel');
+  const btn = document.getElementById('btn-search');
+  if (panel) panel.classList.remove('active');
+  if (btn) {
+    btn.disabled = false;
+    btn.innerHTML = '🚀 Buscar';
+  }
+  loadStats();
+  loadLeads();
 }
 
 // ============ Stats ============
@@ -169,8 +179,6 @@ async function loadStats() {
     document.getElementById('stat-total').textContent = stats.total || 0;
     document.getElementById('stat-with-site').textContent = stats.withSite || 0;
     document.getElementById('stat-with-email').textContent = stats.withEmail || 0;
-    document.getElementById('stat-analyzed').textContent = stats.analyzed || 0;
-    document.getElementById('stat-emailed').textContent = stats.emailed || 0;
   } catch (err) {
     console.error('Erro ao carregar stats:', err);
   }
@@ -203,10 +211,6 @@ function getFilteredLeads() {
       return allLeads.filter(l => l.has_site);
     case 'with-email':
       return allLeads.filter(l => l.email);
-    case 'analyzed':
-      return allLeads.filter(l => l.site_analyzed);
-    case 'emailed':
-      return allLeads.filter(l => l.email_sent);
     default:
       return allLeads;
   }
@@ -252,9 +256,7 @@ function renderLeads() {
       </td>
       <td>
         <div class="actions-cell">
-          ${lead.site_analyzed ? `<button class="btn btn-icon btn-secondary" onclick="viewDiagnostic(${lead.id})" title="Ver diagnóstico">📊</button>` : ''}
           ${lead.website && !lead.email ? `<button class="btn btn-icon btn-secondary" onclick="scrapeLeadContacts(${lead.id})" title="Buscar contatos">📧</button>` : ''}
-          ${lead.email && lead.site_analyzed && !lead.email_sent ? `<button class="btn btn-icon btn-green" onclick="sendLeadEmail(${lead.id})" title="Enviar email">✉️</button>` : ''}
           <button class="btn btn-icon btn-secondary" onclick="deleteLead(${lead.id})" title="Remover" style="color:var(--red);">🗑️</button>
         </div>
       </td>
@@ -266,10 +268,8 @@ function renderLeads() {
 
 function getStatusBadges(lead) {
   const badges = [];
-  if (lead.email_sent) {
-    badges.push('<span class="badge badge-green">✉️ Enviado</span>');
-  } else if (lead.site_analyzed) {
-    badges.push('<span class="badge badge-purple">📊 Analisado</span>');
+  if (lead.email) {
+    badges.push('<span class="badge badge-green">📧 Com Email</span>');
   } else if (lead.has_site) {
     badges.push('<span class="badge badge-yellow">🌐 Com Site</span>');
   } else {
@@ -294,25 +294,6 @@ async function scrapeLeadContacts(id) {
     }
   } catch (err) {
     showToast('Erro ao buscar contatos', 'error');
-  }
-}
-
-async function sendLeadEmail(id) {
-  if (!confirm('Enviar email de diagnóstico para este lead?')) return;
-
-  showToast('Enviando email...', 'info');
-  try {
-    const res = await fetch(`/api/send-email/${id}`, { method: 'POST' });
-    const data = await res.json();
-    if (data.success) {
-      showToast('Email enviado com sucesso!', 'success');
-      loadLeads();
-      loadStats();
-    } else {
-      showToast('Erro: ' + (data.error || 'Falha ao enviar'), 'error');
-    }
-  } catch (err) {
-    showToast('Erro ao enviar email', 'error');
   }
 }
 
@@ -387,88 +368,6 @@ async function deleteSelectedLeads() {
   }
 }
 
-async function viewDiagnostic(id) {
-  try {
-    const res = await fetch(`/api/leads/${id}`);
-    if (res.status === 401) {
-      window.location.href = '/login';
-      return;
-    }
-    const data = await res.json();
-
-    if (!data.diagnostic) {
-      showToast('Diagnóstico não encontrado', 'error');
-      return;
-    }
-
-    const d = normalizeDiagnostic(data.diagnostic);
-    const suggestions = safeParseSuggestions(d.suggestions);
-    const rawParsed = parseDiagnosticRaw(d);
-    const metricsSection = buildLighthouseMetricsSection(rawParsed, data.website);
-
-    document.getElementById('modal-title').textContent = `📊 Diagnóstico - ${data.name}`;
-    document.getElementById('modal-body').innerHTML = `
-      <p style="color:var(--text-muted); font-size:13px; margin-bottom:8px;">
-        Site: <a href="${data.website}" target="_blank" rel="noopener" style="color:var(--accent);">${escapeHtml(data.website)}</a>
-      </p>
-      <p style="color:var(--text-muted); font-size:11px; margin-bottom:16px;">
-        Motor de análise: <strong style="color:var(--text-secondary);">Google PageSpeed Insights</strong> (Lighthouse, estratégia mobile).
-      </p>
-      <div class="score-grid">
-        <div class="score-item">
-          <div class="score-value" style="color:${getScoreColor(d.performance_score)}">${d.performance_score ?? '—'}</div>
-          <div class="score-label">⚡ Performance</div>
-        </div>
-        <div class="score-item">
-          <div class="score-value" style="color:${getScoreColor(d.seo_score)}">${d.seo_score ?? '—'}</div>
-          <div class="score-label">🔍 SEO</div>
-        </div>
-        <div class="score-item">
-          <div class="score-value" style="color:${getScoreColor(d.accessibility_score)}">${d.accessibility_score ?? '—'}</div>
-          <div class="score-label">♿ Acessibilidade</div>
-        </div>
-        <div class="score-item">
-          <div class="score-value" style="color:${getScoreColor(d.best_practices_score)}">${d.best_practices_score ?? '—'}</div>
-          <div class="score-label">✅ Boas Práticas</div>
-        </div>
-      </div>
-
-      <div style="display:flex; gap:12px; margin-bottom:20px;">
-        <div style="flex:1; background:var(--bg-card); border-radius:10px; padding:12px; text-align:center;">
-          <div style="font-size:18px;">${d.has_ssl ? '🔒' : '🔓'}</div>
-          <div style="font-size:11px; color:var(--text-muted); margin-top:4px;">SSL ${d.has_ssl ? 'Ativo' : 'Inativo'}</div>
-        </div>
-        <div style="flex:1; background:var(--bg-card); border-radius:10px; padding:12px; text-align:center;">
-          <div style="font-size:18px;">${d.is_responsive ? '📱' : '🖥️'}</div>
-          <div style="font-size:11px; color:var(--text-muted); margin-top:4px;">${d.is_responsive ? 'Responsivo' : 'Não Responsivo'}</div>
-        </div>
-        <div style="flex:1; background:var(--bg-card); border-radius:10px; padding:12px; text-align:center;">
-          <div style="font-size:18px;">⏱️</div>
-          <div style="font-size:11px; color:var(--text-muted); margin-top:4px;">${d.load_time != null ? Number(d.load_time).toFixed(1) + 's' : '—'}</div>
-        </div>
-      </div>
-
-      ${metricsSection}
-
-      ${suggestions.length > 0 ? `
-        <h4 style="font-size:14px; margin-bottom:12px;">📋 Sugestões de Melhoria</h4>
-        <div class="suggestion-list">
-          ${suggestions.map(s => `
-            <div class="suggestion-item ${s.type}">
-              <div class="suggestion-title">${s.title}</div>
-              <div class="suggestion-desc">${s.description}</div>
-            </div>
-          `).join('')}
-        </div>
-      ` : ''}
-    `;
-
-    document.getElementById('modal-overlay').classList.add('active');
-  } catch (err) {
-    showToast('Erro ao carregar diagnóstico', 'error');
-  }
-}
-
 async function logout() {
   try {
     await fetch('/api/logout', { method: 'POST' });
@@ -477,51 +376,6 @@ async function logout() {
   }
   window.location.href = '/login';
 }
-
-// ============ Email Test ============
-async function testEmail() {
-  const email = prompt('Digite seu email para testar o envio:');
-  if (!email) return;
-
-  showToast('Enviando email de teste...', 'info');
-  try {
-    const res = await fetch('/api/test-email', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email })
-    });
-    const data = await res.json();
-    if (data.success) {
-      showToast('Email de teste enviado! Verifique sua caixa de entrada.', 'success');
-    } else {
-      showToast('Erro: ' + (data.error || 'Falha no envio'), 'error');
-    }
-  } catch (err) {
-    showToast('Erro ao enviar email de teste', 'error');
-  }
-}
-
-async function checkEmailConfig() {
-  try {
-    const res = await fetch('/api/email-config');
-    const data = await res.json();
-    const btn = document.getElementById('btn-test-email');
-    if (!data.configured) {
-      btn.style.opacity = '0.5';
-      btn.title = 'Email não configurado - edite o .env';
-    }
-  } catch (err) {}
-}
-
-// ============ Modal ============
-function closeModal(event) {
-  if (event && event.target !== document.getElementById('modal-overlay')) return;
-  document.getElementById('modal-overlay').classList.remove('active');
-}
-
-document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') closeModal();
-});
 
 // ============ Toast ============
 function showToast(message, type = 'info') {
@@ -558,101 +412,3 @@ function cleanUrl(url) {
   return url.replace(/^https?:\/\//, '').replace(/\/$/, '');
 }
 
-function getScoreColor(score) {
-  if (score === null || score === undefined) return 'var(--text-muted)';
-  if (score >= 90) return 'var(--green)';
-  if (score >= 50) return 'var(--yellow)';
-  return 'var(--red)';
-}
-
-function parseDiagnosticRaw(diagnostic) {
-  const raw = diagnostic.raw_data;
-  if (raw == null) return null;
-  if (typeof raw === 'string') {
-    try {
-      return JSON.parse(raw);
-    } catch {
-      return null;
-    }
-  }
-  return typeof raw === 'object' ? raw : null;
-}
-
-function safeParseSuggestions(value) {
-  if (!value) return [];
-  if (Array.isArray(value)) return value;
-  if (typeof value === 'string') {
-    try {
-      const parsed = JSON.parse(value);
-      return Array.isArray(parsed) ? parsed : [];
-    } catch {
-      return [];
-    }
-  }
-  return [];
-}
-
-function normalizeDiagnostic(diagnostic) {
-  const raw = parseDiagnosticRaw(diagnostic);
-  const categories = raw && raw.lighthouseResult && raw.lighthouseResult.categories
-    ? raw.lighthouseResult.categories
-    : null;
-
-  const pickScore = (current, key) => {
-    if (current !== null && current !== undefined) return current;
-    const score = categories && categories[key] ? categories[key].score : null;
-    if (typeof score !== 'number') return null;
-    return Math.round(score * 100);
-  };
-
-  return {
-    ...diagnostic,
-    performance_score: pickScore(diagnostic.performance_score, 'performance'),
-    accessibility_score: pickScore(diagnostic.accessibility_score, 'accessibility'),
-    best_practices_score: pickScore(diagnostic.best_practices_score, 'best-practices'),
-    seo_score: pickScore(diagnostic.seo_score, 'seo')
-  };
-}
-
-function buildLighthouseMetricsSection(raw, websiteUrl) {
-  if (!raw || typeof raw !== 'object') return '';
-
-  const pairs = [
-    ['firstContentfulPaint', 'FCP — Primeira pintura de conteúdo'],
-    ['largestContentfulPaint', 'LCP — Maior elemento visível'],
-    ['totalBlockingTime', 'TBT — Bloqueio da thread principal'],
-    ['cumulativeLayoutShift', 'CLS — Estabilidade do layout'],
-    ['speedIndex', 'Speed Index'],
-    ['interactive', 'TTI — Tempo até interativo']
-  ];
-
-  const rows = [];
-  for (const [key, label] of pairs) {
-    const v = raw[key];
-    if (v != null && String(v).trim() !== '') {
-      rows.push(`
-        <div class="metric-row">
-          <span class="metric-row-label">${label}</span>
-          <span class="metric-row-value">${escapeHtml(String(v))}</span>
-        </div>`);
-    }
-  }
-
-  if (rows.length === 0) return '';
-
-  let fullUrl = websiteUrl || '';
-  if (fullUrl && !fullUrl.startsWith('http')) fullUrl = 'https://' + fullUrl;
-  const psHref = fullUrl
-    ? `https://pagespeed.web.dev/report?url=${encodeURIComponent(fullUrl)}`
-    : 'https://pagespeed.web.dev/';
-
-  return `
-    <div class="lighthouse-block">
-      <h4 class="lighthouse-block-title">📈 Core Web Vitals e métricas Lighthouse</h4>
-      <p class="lighthouse-block-sub">
-        Valores medidos no teste mobile. Relatório completo no Google:
-        <a href="${psHref}" target="_blank" rel="noopener">abrir no PageSpeed Insights</a>
-      </p>
-      <div class="metric-table">${rows.join('')}</div>
-    </div>`;
-}

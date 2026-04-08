@@ -73,33 +73,8 @@ async function scrapeGoogleMaps(query, location, onProgress = () => {}, options 
           const nameEl = container.querySelector('.fontHeadlineSmall');
           const name = nameEl ? nameEl.textContent.trim() : '';
           if (!name) return;
-
-          const allText = container.textContent;
-
-          const ratingMatch = allText.match(/(\d[.,]\d)\s*\(/);
-          const rating = ratingMatch ? parseFloat(ratingMatch[1].replace(',', '.')) : null;
-
-          const reviewsMatch = allText.match(/\((\d[\d.]*)\)/);
-          const reviewsCount = reviewsMatch ? parseInt(reviewsMatch[1].replace('.', ''), 10) : null;
-
           const href = link.getAttribute('href') || '';
-
-          const spans = container.querySelectorAll('.fontBodyMedium span');
-          let category = '';
-          let address = '';
-
-          spans.forEach((span) => {
-            const t = span.textContent.trim();
-            if (t.startsWith('·')) return;
-            if (!category && t.length > 2 && !t.includes('Aberto') && !t.includes('Fechado') && !t.match(/^\d/)) {
-              category = t;
-            }
-            if (!address && (t.includes(',') || t.match(/\d{5}/)) && t.length > 10) {
-              address = t;
-            }
-          });
-
-          items.push({ name, rating, reviewsCount, category, address, href });
+          items.push({ name, href });
         } catch (e) {
           /* skip item */
         }
@@ -175,39 +150,33 @@ async function scrapeGoogleMaps(query, location, onProgress = () => {}, options 
               });
             }
 
-            const addressBtn = document.querySelector('button[data-item-id="address"]');
-            const address = addressBtn
-              ? (addressBtn.getAttribute('aria-label') || '').replace('Endereço: ', '')
-              : '';
-
-            return { phone, website, address };
+            return { phone, website };
           });
 
           biz.phone = details.phone || biz.phone || '';
           biz.website = details.website || '';
-          biz.address = details.address || biz.address || '';
         }
 
         businesses.push({
           name: biz.name,
-          address: biz.address || '',
+          address: '',
           phone: biz.phone || '',
           website: biz.website || '',
-          rating: biz.rating,
-          reviews_count: biz.reviewsCount,
-          category: biz.category || '',
+          rating: null,
+          reviews_count: null,
+          category: '',
           email: '',
           whatsapp: ''
         });
       } catch (err) {
         businesses.push({
           name: biz.name,
-          address: biz.address || '',
+          address: '',
           phone: biz.phone || '',
           website: '',
-          rating: biz.rating,
-          reviews_count: biz.reviewsCount,
-          category: biz.category || '',
+          rating: null,
+          reviews_count: null,
+          category: '',
           email: '',
           whatsapp: ''
         });

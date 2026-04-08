@@ -18,12 +18,10 @@
                 <div class="logo-icon">🗺️</div>
                 <div>
                     <h1>Bot Mapeeiro</h1>
-                    <p>Lead Generation &amp; Site Diagnostics</p>
+                    <p>Lead Generation</p>
                 </div>
             </div>
             <div class="header-actions">
-                <button class="btn btn-secondary btn-sm" onclick="testEmail()" id="btn-test-email"
-                    title="Testar email">📧 Testar Email</button>
                 <button class="btn btn-secondary btn-sm" onclick="loadStats()" title="Atualizar">🔄 Atualizar</button>
                 <button class="btn btn-secondary btn-sm" onclick="logout()" title="Sair">🚪 Sair</button>
             </div>
@@ -45,14 +43,6 @@
             <div class="stat-card">
                 <div class="stat-number" id="stat-with-email">0</div>
                 <div class="stat-label">Com Email</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-number" id="stat-analyzed">0</div>
-                <div class="stat-label">Analisados</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-number" id="stat-emailed">0</div>
-                <div class="stat-label">Emails Enviados</div>
             </div>
         </div>
 
@@ -84,10 +74,6 @@
                     <input type="checkbox" id="opt-contacts" checked>
                     <label for="opt-contacts">Buscar contatos nos sites</label>
                 </label>
-                <label class="checkbox-group">
-                    <input type="checkbox" id="opt-email">
-                    <label for="opt-email">Enviar emails automaticamente</label>
-                </label>
             </div>
             <p class="options-hint">A coleta salva os dados do Google Maps e, se ativado, busca emails/WhatsApp nas páginas de contato dos sites encontrados.</p>
         </div>
@@ -115,8 +101,6 @@
                         <button class="filter-btn active" onclick="filterLeads('all', this)">Todos</button>
                         <button class="filter-btn" onclick="filterLeads('with-site', this)">Com Site</button>
                         <button class="filter-btn" onclick="filterLeads('with-email', this)">Com Email</button>
-                        <button class="filter-btn" onclick="filterLeads('analyzed', this)">Analisados</button>
-                        <button class="filter-btn" onclick="filterLeads('emailed', this)">Enviados</button>
                     </div>
                     <button class="btn btn-danger btn-sm" id="btn-delete-selected" onclick="deleteSelectedLeads()" disabled>
                         🗑 Excluir selecionados (0)
@@ -152,17 +136,6 @@
                     </tbody>
                 </table>
             </div>
-        </div>
-    </div>
-
-    <!-- Modal -->
-    <div class="modal-overlay" id="modal-overlay" onclick="closeModal(event)">
-        <div class="modal" id="modal-content">
-            <div class="modal-header">
-                <h3 id="modal-title">Diagnóstico</h3>
-                <button class="modal-close" onclick="closeModal()">&times;</button>
-            </div>
-            <div class="modal-body" id="modal-body"></div>
         </div>
     </div>
 

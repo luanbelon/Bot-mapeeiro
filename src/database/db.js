@@ -133,54 +133,6 @@ module.exports = {
     );
   },
 
-  async markSiteAnalyzed(id) {
-    await ensureSchema();
-    await getPool().query('UPDATE leads SET site_analyzed = 1 WHERE id = $1', [id]);
-  },
-
-  async markEmailSent(id) {
-    await ensureSchema();
-    await getPool().query('UPDATE leads SET email_sent = 1 WHERE id = $1', [id]);
-  },
-
-  async insertDiagnostic(data) {
-    await ensureSchema();
-    const suggestions = data.suggestions || [];
-    const raw = data.raw_data || {};
-    const { rows } = await getPool().query(
-      `INSERT INTO diagnostics (lead_id, performance_score, accessibility_score, best_practices_score, seo_score, has_ssl, is_responsive, load_time, suggestions, raw_data)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10::jsonb)
-       RETURNING id`,
-      [
-        data.lead_id,
-        data.performance_score ?? null,
-        data.accessibility_score ?? null,
-        data.best_practices_score ?? null,
-        data.seo_score ?? null,
-        data.has_ssl ? 1 : 0,
-        data.is_responsive ? 1 : 0,
-        data.load_time ?? null,
-        JSON.stringify(Array.isArray(suggestions) ? suggestions : []),
-        JSON.stringify(typeof raw === 'object' ? raw : {})
-      ]
-    );
-    return rows[0].id;
-  },
-
-  async insertEmailRecord(data) {
-    await ensureSchema();
-    await getPool().query(
-      `INSERT INTO emails_sent (lead_id, to_email, status, error_message)
-       VALUES ($1, $2, $3, $4)`,
-      [
-        data.lead_id,
-        data.to_email,
-        data.status || 'sent',
-        data.error_message || null
-      ]
-    );
-  },
-
   async getLeads(filters = {}) {
     await ensureSchema();
     let query = 'SELECT * FROM leads WHERE 1=1';
@@ -221,28 +173,15 @@ module.exports = {
     return rows[0] || null;
   },
 
-  async getDiagnosticByLeadId(leadId) {
-    await ensureSchema();
-    const { rows } = await getPool().query(
-      'SELECT * FROM diagnostics WHERE lead_id = $1 ORDER BY created_at DESC LIMIT 1',
-      [leadId]
-    );
-    return rows[0] || null;
-  },
-
   async getStats() {
     await ensureSchema();
     const p = getPool();
     const total = (await p.query('SELECT COUNT(*)::int AS count FROM leads')).rows[0].count;
     const withSite = (await p.query('SELECT COUNT(*)::int AS count FROM leads WHERE has_site = 1')).rows[0]
       .count;
-    const analyzed = (await p.query('SELECT COUNT(*)::int AS count FROM leads WHERE site_analyzed = 1')).rows[0]
-      .count;
-    const emailed = (await p.query('SELECT COUNT(*)::int AS count FROM leads WHERE email_sent = 1')).rows[0]
-      .count;
     const withEmail = (await p.query("SELECT COUNT(*)::int AS count FROM leads WHERE email IS NOT NULL AND email != ''"))
       .rows[0].count;
-    return { total, withSite, analyzed, emailed, withEmail };
+    return { total, withSite, withEmail };
   },
 
   async deleteLead(id) {

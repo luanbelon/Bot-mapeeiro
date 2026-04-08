@@ -5,7 +5,6 @@ const crypto = require('crypto');
 const db = require('./src/database/db');
 const orchestrator = require('./src/orchestrator');
 const { scrapeContacts } = require('./src/scraper/contactScraper');
-const { sendDiagnosticEmail, sendTestEmail, initMailer } = require('./src/mailer/mailer');
 
 const app = express();
 
@@ -219,7 +218,7 @@ orchestrator.on('error', (error) => {
 });
 
 app.post('/api/search', async (req, res) => {
-  const { query, location, autoEmail, scrapeContacts: sc, maxResults } = req.body;
+  const { query, location, scrapeContacts: sc, maxResults } = req.body;
 
   if (!query || !location) {
     return res.status(400).json({ error: 'Query e location são obrigatórios' });
@@ -231,7 +230,6 @@ app.post('/api/search', async (req, res) => {
 
   const pipeline = orchestrator
     .runFullPipeline(query, location, {
-      autoEmail: autoEmail === true,
       scrapeContacts: sc !== false,
       maxResults
     })
@@ -280,9 +278,7 @@ app.get('/api/leads/:id', async (req, res) => {
   try {
     const lead = await db.getLeadById(parseInt(req.params.id, 10));
     if (!lead) return res.status(404).json({ error: 'Lead não encontrado' });
-
-    const diagnostic = await db.getDiagnosticByLeadId(lead.id);
-    res.json({ ...lead, diagnostic });
+    res.json(lead);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -309,39 +305,6 @@ app.post('/api/scrape-contacts/:id', async (req, res) => {
   }
 });
 
-app.post('/api/send-email/:id', async (req, res) => {
-  try {
-    const lead = await db.getLeadById(parseInt(req.params.id, 10));
-    if (!lead) return res.status(404).json({ error: 'Lead não encontrado' });
-    if (!lead.email) return res.status(400).json({ error: 'Lead não possui email' });
-
-    const diagnostic = await db.getDiagnosticByLeadId(lead.id);
-    if (!diagnostic) return res.status(400).json({ error: 'Site ainda não foi analisado' });
-
-    const result = await sendDiagnosticEmail(lead, diagnostic);
-    await db.insertEmailRecord({
-      lead_id: lead.id,
-      to_email: lead.email,
-      status: result.success ? 'sent' : 'failed',
-      error_message: result.error || null
-    });
-    if (result.success) {
-      await db.markEmailSent(lead.id);
-    }
-    res.json(result);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.post('/api/test-email', async (req, res) => {
-  const { email } = req.body;
-  if (!email) return res.status(400).json({ error: 'Email é obrigatório' });
-
-  const result = await sendTestEmail(email);
-  res.json(result);
-});
-
 app.get('/api/stats', async (req, res) => {
   try {
     res.json(await db.getStats());
@@ -359,28 +322,10 @@ app.delete('/api/leads/:id', async (req, res) => {
   }
 });
 
-app.get('/api/email-config', (req, res) => {
-  res.json({
-    configured: !!(process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD),
-    user: process.env.GMAIL_USER
-      ? process.env.GMAIL_USER.replace(/(.{3}).*(@.*)/, '$1***$2')
-      : null
-  });
-});
-
-if (process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD) {
-  initMailer();
-}
-
 const PORT = process.env.PORT || 3000;
 if (require.main === module) {
   app.listen(PORT, () => {
     console.log(`\n🤖 Bot Mapeeiro rodando em http://localhost:${PORT}\n`);
-    if (process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD) {
-      console.log('📧 Email configurado com:', process.env.GMAIL_USER);
-    } else {
-      console.log('⚠️  Email não configurado. Edite o arquivo .env');
-    }
     console.log('');
   });
 }
