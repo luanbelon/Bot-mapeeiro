@@ -138,7 +138,6 @@ async function startSearch() {
         query,
         location,
         scrapeContacts: document.getElementById('opt-contacts').checked,
-        autoAnalyze: document.getElementById('opt-analyze').checked,
         autoEmail: document.getElementById('opt-email').checked
       })
     });
@@ -258,7 +257,6 @@ function renderLeads() {
       </td>
       <td>
         <div class="actions-cell">
-          ${lead.website && !lead.site_analyzed ? `<button class="btn btn-icon btn-cyan" onclick="analyzeLead(${lead.id})" title="Analisar site">🔍</button>` : ''}
           ${lead.site_analyzed ? `<button class="btn btn-icon btn-secondary" onclick="viewDiagnostic(${lead.id})" title="Ver diagnóstico">📊</button>` : ''}
           ${lead.website && !lead.email ? `<button class="btn btn-icon btn-secondary" onclick="scrapeLeadContacts(${lead.id})" title="Buscar contatos">📧</button>` : ''}
           ${lead.email && lead.site_analyzed && !lead.email_sent ? `<button class="btn btn-icon btn-green" onclick="sendLeadEmail(${lead.id})" title="Enviar email">✉️</button>` : ''}
@@ -286,24 +284,6 @@ function getStatusBadges(lead) {
 }
 
 // ============ Actions ============
-async function analyzeLead(id) {
-  showToast('Analisando site... isso pode demorar até 60s', 'info');
-  try {
-    const res = await fetch(`/api/analyze/${id}`, { method: 'POST' });
-    const data = await res.json();
-    if (data.success) {
-      showToast('Site analisado com sucesso!', 'success');
-      loadLeads();
-      loadStats();
-      viewDiagnostic(id);
-    } else {
-      showToast('Erro: ' + (data.error || 'Falha na análise'), 'error');
-    }
-  } catch (err) {
-    showToast('Erro ao analisar site', 'error');
-  }
-}
-
 async function scrapeLeadContacts(id) {
   showToast('Buscando contatos...', 'info');
   try {
@@ -422,22 +402,8 @@ async function viewDiagnostic(id) {
     const data = await res.json();
 
     if (!data.diagnostic) {
-      if (data.website) {
-        showToast('Diagnóstico antigo sem dados. Reanalisando o site...', 'info');
-        const refreshRes = await fetch(`/api/analyze/${id}`, { method: 'POST' });
-        const refreshData = await refreshRes.json();
-        if (refreshRes.ok && refreshData.success && refreshData.diagnostic) {
-          data.diagnostic = refreshData.diagnostic;
-          loadLeads();
-          loadStats();
-        } else {
-          showToast('Diagnóstico não encontrado', 'error');
-          return;
-        }
-      } else {
-        showToast('Diagnóstico não encontrado', 'error');
-        return;
-      }
+      showToast('Diagnóstico não encontrado', 'error');
+      return;
     }
 
     const d = normalizeDiagnostic(data.diagnostic);

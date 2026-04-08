@@ -1,6 +1,5 @@
 const { scrapeGoogleMaps } = require('./scraper/mapsScraper');
 const { scrapeContacts } = require('./scraper/contactScraper');
-const { analyzeSite } = require('./analyzer/siteAnalyzer');
 const { sendDiagnosticEmail } = require('./mailer/mailer');
 const db = require('./database/db');
 const EventEmitter = require('events');
@@ -14,7 +13,7 @@ class Orchestrator extends EventEmitter {
   }
 
   /**
-   * Run the full pipeline: Search → Scrape Contacts → Analyze → Email
+   * Run the full pipeline: Search → Scrape Contacts → Email
    */
   async runFullPipeline(query, location, options = {}) {
     if (this.isRunning) {
@@ -26,7 +25,6 @@ class Orchestrator extends EventEmitter {
     this.currentSearch = { query, location };
 
     const {
-      autoAnalyze = true,
       autoEmail = false,
       scrapeContacts: shouldScrapeContacts = true
     } = options;
@@ -100,50 +98,6 @@ class Orchestrator extends EventEmitter {
           }
 
           await delay(1000 + Math.random() * 2000);
-        }
-      }
-
-      if (this.shouldStop) return this.stopResult();
-
-      if (autoAnalyze) {
-        const socialDomains = ['instagram.com', 'facebook.com', 'twitter.com', 'x.com', 'tiktok.com', 'linkedin.com', 'linktr.ee', 'linktree.com', 'tr.ee'];
-        const leadsToAnalyze = [];
-        for (const id of leadIds) {
-          const lead = await db.getLeadById(id);
-          if (!lead || !lead.website || lead.site_analyzed) continue;
-          const urlLower = lead.website.toLowerCase();
-          const isSocial = socialDomains.some((d) => urlLower.includes(d));
-          if (isSocial) {
-            console.log(`Pulando ${lead.name} - link de rede social: ${lead.website}`);
-            continue;
-          }
-          leadsToAnalyze.push(lead);
-        }
-
-        for (let i = 0; i < leadsToAnalyze.length; i++) {
-          if (this.shouldStop) return this.stopResult();
-
-          const lead = leadsToAnalyze[i];
-          this.emit('progress', {
-            phase: 'analyzing',
-            message: `Analisando site: ${lead.name} (${i + 1}/${leadsToAnalyze.length})`,
-            percent: 60 + Math.round((i / leadsToAnalyze.length) * 25),
-            current: i + 1,
-            total: leadsToAnalyze.length
-          });
-
-          try {
-            const analysis = await analyzeSite(lead.website);
-            await db.insertDiagnostic({
-              lead_id: lead.id,
-              ...analysis
-            });
-            await db.markSiteAnalyzed(lead.id);
-          } catch (err) {
-            console.error(`Erro ao analisar site de ${lead.name}:`, err.message);
-          }
-
-          await delay(10000 + Math.random() * 5000);
         }
       }
 

@@ -4,7 +4,6 @@ const path = require('path');
 const crypto = require('crypto');
 const db = require('./src/database/db');
 const orchestrator = require('./src/orchestrator');
-const { analyzeSite } = require('./src/analyzer/siteAnalyzer');
 const { scrapeContacts } = require('./src/scraper/contactScraper');
 const { sendDiagnosticEmail, sendTestEmail, initMailer } = require('./src/mailer/mailer');
 
@@ -219,7 +218,7 @@ orchestrator.on('error', (error) => {
 });
 
 app.post('/api/search', async (req, res) => {
-  const { query, location, autoAnalyze, autoEmail, scrapeContacts: sc } = req.body;
+  const { query, location, autoEmail, scrapeContacts: sc } = req.body;
 
   if (!query || !location) {
     return res.status(400).json({ error: 'Query e location são obrigatórios' });
@@ -231,7 +230,6 @@ app.post('/api/search', async (req, res) => {
 
   const pipeline = orchestrator
     .runFullPipeline(query, location, {
-      autoAnalyze: autoAnalyze !== false,
       autoEmail: autoEmail === true,
       scrapeContacts: sc !== false
     })
@@ -283,23 +281,6 @@ app.get('/api/leads/:id', async (req, res) => {
 
     const diagnostic = await db.getDiagnosticByLeadId(lead.id);
     res.json({ ...lead, diagnostic });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.post('/api/analyze/:id', async (req, res) => {
-  try {
-    const lead = await db.getLeadById(parseInt(req.params.id, 10));
-    if (!lead) return res.status(404).json({ error: 'Lead não encontrado' });
-    if (!lead.website) return res.status(400).json({ error: 'Lead não possui site' });
-
-    const analysis = await analyzeSite(lead.website);
-    await db.insertDiagnostic({ lead_id: lead.id, ...analysis });
-    await db.markSiteAnalyzed(lead.id);
-
-    const diagnostic = await db.getDiagnosticByLeadId(lead.id);
-    res.json({ success: true, diagnostic });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
