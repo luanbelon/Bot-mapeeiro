@@ -41,11 +41,6 @@ async function syncJobFromServer() {
     if (data.isRunning) {
       startProgressPoll();
       if (data.progress) updateProgress(data.progress);
-      return;
-    }
-    if (data.progress && data.progress.phase && data.progress.phase !== 'done' && data.progress.phase !== 'error') {
-      startProgressPoll();
-      updateProgress(data.progress);
     }
   } catch (e) {
     /* offline */
@@ -59,14 +54,11 @@ function startProgressPoll() {
       const res = await fetch('/api/job-status');
       const data = await res.json();
       if (data.progress) updateProgress(data.progress);
-      if (!data.isRunning) {
-        const ph = data.progress && data.progress.phase;
-        if (ph === 'done' || ph === 'error') stopProgressPoll();
-      }
+      if (!data.isRunning) stopProgressPoll();
     } catch (e) {
       /* ignore */
     }
-  }, 1500);
+  }, 5000);
 }
 
 function stopProgressPoll() {
