@@ -42,7 +42,10 @@ class Orchestrator extends EventEmitter {
           this.emit('progress', {
             phase: 'scraping',
             message: progress.message,
-            percent: 5 + (progress.current ? Math.round((progress.current / progress.total) * 30) : 10),
+            // Barra da fase Maps: ~5–40% (depois vem "Salvando" em 40%)
+            percent:
+              5 +
+              (progress.current ? Math.round((progress.current / progress.total) * 35) : 8),
             detail: progress
           });
         },

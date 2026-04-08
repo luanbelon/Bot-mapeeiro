@@ -23,10 +23,13 @@ async function scrapeGoogleMaps(query, location, onProgress = () => {}, options 
     await page.setUserAgent(
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     );
+    // Google Maps mantém conexões abertas: networkidle2 pode travar ou demorar demais.
+    await page.setDefaultNavigationTimeout(45000);
+    await page.setDefaultTimeout(15000);
 
     const url = `https://www.google.com/maps/search/${encodeURIComponent(searchTerm)}`;
     onProgress({ step: 'navigating', message: 'Abrindo Google Maps...' });
-    await page.goto(url, { waitUntil: 'networkidle2', timeout: 60000 });
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45000 });
 
     await delay(3000);
 
@@ -105,8 +108,8 @@ async function scrapeGoogleMaps(query, location, onProgress = () => {}, options 
 
       try {
         if (biz.href) {
-          await page.goto(biz.href, { waitUntil: 'networkidle2', timeout: 30000 });
-          await delay(2000 + Math.random() * 2000);
+          await gotoPlacePage(page, biz.href, shouldStop);
+          await delay(1500 + Math.random() * 1000);
 
           const details = await page.evaluate(() => {
             let phone = '';
@@ -169,6 +172,11 @@ async function scrapeGoogleMaps(query, location, onProgress = () => {}, options 
           whatsapp: ''
         });
       } catch (err) {
+        if (err && err.code === 'STOPPED') {
+          onProgress({ step: 'stopped', message: 'Busca interrompida pelo usuário.' });
+          return businesses;
+        }
+        console.warn(`Detalhe do lead "${biz.name}":`, err.message);
         businesses.push({
           name: biz.name,
           address: '',
@@ -195,6 +203,42 @@ async function scrapeGoogleMaps(query, location, onProgress = () => {}, options 
   }
 
   return businesses;
+}
+
+/**
+ * Abre a página do lugar sem networkidle2 (Maps quase nunca fica "idle").
+ * Opcionalmente interrompe navegação ao parar a busca.
+ */
+async function gotoPlacePage(page, href, shouldStop) {
+  const NAV_TIMEOUT_MS = 22000;
+  let intervalId;
+  const stopPromise = new Promise((_, reject) => {
+    intervalId = setInterval(() => {
+      if (shouldStop()) {
+        reject(Object.assign(new Error('Parado pelo usuário'), { code: 'STOPPED' }));
+      }
+    }, 400);
+  });
+  try {
+    await Promise.race([
+      page.goto(href, { waitUntil: 'domcontentloaded', timeout: NAV_TIMEOUT_MS }),
+      stopPromise
+    ]);
+  } catch (err) {
+    if (err && err.code === 'STOPPED') {
+      try {
+        const client = await page.target().createCDPSession();
+        await client.send('Page.stopLoading');
+      } catch (_) {
+        /* ignore */
+      }
+      throw err;
+    }
+    // Timeout ou falha de rede: segue com HTML parcial para o evaluate
+    console.warn(`goto place (continua com dados parciais): ${err.message}`);
+  } finally {
+    if (intervalId) clearInterval(intervalId);
+  }
 }
 
 function delay(ms) {
