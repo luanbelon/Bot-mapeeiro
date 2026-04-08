@@ -26,7 +26,8 @@ class Orchestrator extends EventEmitter {
 
     const {
       autoEmail = false,
-      scrapeContacts: shouldScrapeContacts = true
+      scrapeContacts: shouldScrapeContacts = true,
+      maxResults = 20
     } = options;
 
     try {
@@ -36,14 +37,22 @@ class Orchestrator extends EventEmitter {
         percent: 5
       });
 
-      const businesses = await scrapeGoogleMaps(query, location, (progress) => {
-        this.emit('progress', {
-          phase: 'scraping',
-          message: progress.message,
-          percent: 5 + (progress.current ? Math.round((progress.current / progress.total) * 30) : 10),
-          detail: progress
-        });
-      });
+      const businesses = await scrapeGoogleMaps(
+        query,
+        location,
+        (progress) => {
+          this.emit('progress', {
+            phase: 'scraping',
+            message: progress.message,
+            percent: 5 + (progress.current ? Math.round((progress.current / progress.total) * 30) : 10),
+            detail: progress
+          });
+        },
+        {
+          maxResults,
+          shouldStop: () => this.shouldStop
+        }
+      );
 
       if (this.shouldStop) return this.stopResult();
 
@@ -178,6 +187,7 @@ class Orchestrator extends EventEmitter {
   stopResult() {
     this.isRunning = false;
     this.currentSearch = null;
+    this.emit('progress', { phase: 'done', message: 'Busca interrompida pelo usuário', percent: 100 });
     return { success: false, message: 'Busca interrompida pelo usuário' };
   }
 

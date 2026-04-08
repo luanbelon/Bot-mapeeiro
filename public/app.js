@@ -123,12 +123,15 @@ async function startSearch() {
   btn.innerHTML = '<span class="spinner"></span> Buscando...';
 
   try {
+    const limitEl = document.getElementById('search-limit');
+    const maxResults = limitEl ? parseInt(limitEl.value, 10) : 20;
     const res = await fetch('/api/search', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         query,
         location,
+        maxResults,
         scrapeContacts: document.getElementById('opt-contacts').checked,
         autoEmail: document.getElementById('opt-email').checked
       })

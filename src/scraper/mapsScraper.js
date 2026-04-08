@@ -3,11 +3,14 @@
  * @param {string} query - Business type (e.g., "Restaurantes")
  * @param {string} location - City/neighborhood (e.g., "Salvador BA")
  * @param {function} onProgress - Callback for progress updates
+ * @param {{maxResults?: number, shouldStop?: function}} options
  * @returns {Promise<Array>} Array of business objects
  */
-async function scrapeGoogleMaps(query, location, onProgress = () => {}) {
+async function scrapeGoogleMaps(query, location, onProgress = () => {}, options = {}) {
   const { launchBrowser } = require('./puppeteerLaunch');
   const searchTerm = `${query} em ${location}`;
+  const maxResults = clampResults(options.maxResults);
+  const shouldStop = typeof options.shouldStop === 'function' ? options.shouldStop : () => false;
   onProgress({ step: 'init', message: `Iniciando busca: "${searchTerm}"` });
 
   const browser = await launchBrowser();
@@ -41,6 +44,10 @@ async function scrapeGoogleMaps(query, location, onProgress = () => {}) {
     await page.waitForSelector(resultsSelector, { timeout: 15000 }).catch(() => null);
 
     for (let i = 0; i < 5; i++) {
+      if (shouldStop()) {
+        onProgress({ step: 'stopped', message: 'Busca interrompida pelo usuário.' });
+        return businesses;
+      }
       await page.evaluate((sel) => {
         const feed = document.querySelector(sel);
         if (feed) feed.scrollTop = feed.scrollHeight;
@@ -101,18 +108,24 @@ async function scrapeGoogleMaps(query, location, onProgress = () => {}) {
       return items;
     });
 
+    const limitedResults = results.slice(0, maxResults);
+
     onProgress({
       step: 'details',
-      message: `Encontrados ${results.length} negócios. Coletando detalhes...`
+      message: `Encontrados ${results.length} negócios. Coletando até ${limitedResults.length} detalhes...`
     });
 
-    for (let i = 0; i < results.length; i++) {
-      const biz = results[i];
+    for (let i = 0; i < limitedResults.length; i++) {
+      if (shouldStop()) {
+        onProgress({ step: 'stopped', message: 'Busca interrompida pelo usuário.' });
+        return businesses;
+      }
+      const biz = limitedResults[i];
       onProgress({
         step: 'details',
-        message: `Coletando detalhes: ${biz.name} (${i + 1}/${results.length})`,
+        message: `Coletando detalhes: ${biz.name} (${i + 1}/${limitedResults.length})`,
         current: i + 1,
-        total: results.length
+        total: limitedResults.length
       });
 
       try {
@@ -217,6 +230,12 @@ async function scrapeGoogleMaps(query, location, onProgress = () => {}) {
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function clampResults(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return 20;
+  return Math.min(30, Math.max(20, Math.trunc(parsed)));
 }
 
 module.exports = { scrapeGoogleMaps };

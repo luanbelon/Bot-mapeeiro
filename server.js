@@ -186,7 +186,8 @@ app.get('/api/progress', (req, res) => {
 
   db.getJobProgress()
     .then((payload) => {
-      if (payload && Object.keys(payload).length > 0) {
+      const status = orchestrator.getStatus();
+      if (status.isRunning && payload && Object.keys(payload).length > 0) {
         res.write(`data: ${JSON.stringify(payload)}\n\n`);
       }
     })
@@ -200,7 +201,7 @@ app.get('/api/job-status', async (req, res) => {
     res.json({
       isRunning: status.isRunning,
       currentSearch: status.currentSearch,
-      progress: progress && Object.keys(progress).length > 0 ? progress : null
+      progress: status.isRunning && progress && Object.keys(progress).length > 0 ? progress : null
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -218,7 +219,7 @@ orchestrator.on('error', (error) => {
 });
 
 app.post('/api/search', async (req, res) => {
-  const { query, location, autoEmail, scrapeContacts: sc } = req.body;
+  const { query, location, autoEmail, scrapeContacts: sc, maxResults } = req.body;
 
   if (!query || !location) {
     return res.status(400).json({ error: 'Query e location são obrigatórios' });
@@ -231,7 +232,8 @@ app.post('/api/search', async (req, res) => {
   const pipeline = orchestrator
     .runFullPipeline(query, location, {
       autoEmail: autoEmail === true,
-      scrapeContacts: sc !== false
+      scrapeContacts: sc !== false,
+      maxResults
     })
     .catch((err) => {
       console.error('Pipeline error:', err);
